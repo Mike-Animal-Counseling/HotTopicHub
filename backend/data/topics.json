@@ -1,0 +1,54 @@
+{
+  "topics": [
+    {
+      "title": "AI Agents Enter Mainstream Tools",
+      "summary": "Major developer platforms are shipping autonomous coding agents to boost team velocity.",
+      "source_url": "https://example.com/ai-agents-mainstream"
+    },
+    {
+      "title": "Open Source Security Rules Tighten",
+      "summary": "New supply-chain policies push maintainers to adopt stronger provenance and signing.",
+      "source_url": "https://example.com/oss-security"
+    },
+    {
+      "title": "Web Performance Budgets Return",
+      "summary": "Product teams revive strict performance budgets to improve conversion on mobile.",
+      "source_url": "https://example.com/perf-budgets"
+    },
+    {
+      "title": "Remote Work Tax Policies Update",
+      "summary": "Several regions clarify tax obligations for cross-border remote employees.",
+      "source_url": "https://example.com/remote-tax"
+    },
+    {
+      "title": "Battery Tech Breakthrough Claims",
+      "summary": "Labs report higher-density prototypes, while analysts warn about scaling challenges.",
+      "source_url": "https://example.com/battery-tech"
+    },
+    {
+      "title": "Short-form Video Commerce Grows",
+      "summary": "Creators and brands are using direct checkout integrations inside short videos.",
+      "source_url": "https://example.com/video-commerce"
+    },
+    {
+      "title": "Cloud Costs Drive Architecture Redesign",
+      "summary": "Teams are moving batch jobs and storage tiers to cut monthly cloud bills.",
+      "source_url": "https://example.com/cloud-cost"
+    },
+    {
+      "title": "Education Platforms Adopt AI Tutors",
+      "summary": "Schools pilot conversational tutors with strict moderation and audit trails.",
+      "source_url": "https://example.com/ai-tutor"
+    },
+    {
+      "title": "Electric Vehicle Price War Continues",
+      "summary": "Manufacturers lower entry-level EV prices to maintain demand and market share.",
+      "source_url": "https://example.com/ev-price-war"
+    },
+    {
+      "title": "Global Chip Supply Stabilizes",
+      "summary": "Lead times fall for several categories, improving hardware release planning.",
+      "source_url": "https://example.com/chip-supply"
+    }
+  ]
+}
