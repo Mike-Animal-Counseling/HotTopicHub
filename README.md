@@ -1,6 +1,6 @@
-# Comment App
+# AI Builder Daily Hub
 
-A simple full-stack comment application with CRUD functions.
+A full-stack daily topic aggregation platform. Automatically fetches, deduplicates, clusters, and ranks the top 10 AI and builder-focused topics each day from multiple sources. Users can browse topics, leave comments, and like content. Admins can moderate comments through a dedicated dashboard.
 
 ## Tech Stack
 
@@ -13,28 +13,78 @@ A simple full-stack comment application with CRUD functions.
 **Frontend**
 
 - React (Vite)
+- React Router
 
 ---
 
 ## Features
 
-- List all comments
-- Add a new comment (as Admin)
-- Edit existing comments
-- Delete comments
-- Display author, text, created time, likes, and image
+**Topics**
+
+- Aggregates daily topics from HackerNews, GitHub Trending, Product Hunt, TechCrunch, and HuggingFace
+- Deduplication, title clustering, and AI keyword filtering pipeline
+- Source-balanced top 10 selection per day
+- Topic ranking by engagement score (likes + comments)
+- AI-generated summaries: key insights, why it matters, technical summary
+- Topic history archive by date
+
+**Comments**
+
+- Submit comments on any topic
+- Auto-moderation on submission (profanity, spam, rate limiting)
+- Like comments
+- Report comments
+- Ranked highlights (Top Insight, Top Resource, Top Technical Comment)
+
+**Admin**
+
+- Token-protected moderation dashboard
+- Pending review queue for flagged comments
+- Approve, reject, hide, restore actions
+- Processed list with reopen-for-review capability
+- Reports and activity log tables
+
+---
 
 ## Data Seeding
 
-- Seed file: `backend/data/comments.json`
-- The database auto-seeds on backend startup **only if the comments table is empty**.
+- Comment seed file: `backend/data/comments.json`
+- The database auto-seeds on backend startup only if the comments table is empty.
+- Topics are generated automatically on startup via the pipeline (no manual seed needed).
+
+---
 
 ## API Endpoints
 
-- `GET /comments`
-- `POST /comments`
-- `PATCH /comments/{comment_id}`
-- `DELETE /comments/{comment_id}`
+**Topics**
+
+- `GET /api/topics` — list topics for a date
+- `GET /api/topics/trending` — top 10 topics for a date
+- `GET /api/topics/history` — list all daily batches
+- `GET /api/topics/{id}` — get a single topic
+- `POST /api/topics/seed-daily` — trigger pipeline manually
+- `POST /api/topics/{id}/like` — like a topic
+- `DELETE /api/topics/{id}/like` — unlike a topic
+
+**Comments**
+
+- `GET /api/topics/{id}/comments` — list all comments for a topic
+- `GET /api/topics/{id}/comments/highlights` — ranked top comments
+- `POST /api/topics/{id}/comments` — submit a comment
+- `PATCH /api/comments/{id}` — edit a comment
+- `DELETE /api/comments/{id}` — delete a comment
+- `POST /api/comments/{id}/like` — like a comment
+- `DELETE /api/comments/{id}/like` — unlike a comment
+- `POST /api/comments/{id}/report` — report a comment
+
+**Admin** (requires `X-Admin-Token` header)
+
+- `GET /api/admin/moderation/queue` — pending review comments
+- `GET /api/admin/moderation/processed` — recently approved/rejected comments
+- `GET /api/admin/moderation/logs` — activity logs
+- `GET /api/admin/reports` — open reports
+- `PATCH /api/admin/comments/{id}` — approve, reject, hide, or restore
+- `POST /api/admin/comments/{id}/reopen` — reopen for re-review
 
 ---
 
@@ -42,18 +92,23 @@ A simple full-stack comment application with CRUD functions.
 
 1. Navigate to the backend directory
    ```
-   cd .\Bobyard-Comment\
-   cd .\backend\
+   cd .\Bobyard-Comment\backend\
    ```
-2. Create and activate a virtual environment (optional)
-3. Install dependencies:
-   ```bash
+2. Create and activate a virtual environment
+   ```
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   ```
+3. Install dependencies
+   ```
    pip install -r requirements.txt
    ```
 4. Start the backend server
    ```
-   uvicorn app.main:app --reload --port 8000
+   python -m uvicorn app.main:app --reload
    ```
+
+The topic pipeline runs automatically on startup. The default admin token is `dev-admin-token` (override with `ADMIN_TOKEN` environment variable).
 
 ---
 
@@ -61,10 +116,9 @@ A simple full-stack comment application with CRUD functions.
 
 1. Navigate to the frontend directory
    ```
-   cd .\Bobyard-Comment\
-   cd .\frontend\
+   cd .\Bobyard-Comment\frontend\
    ```
-2. Install dependencies:
+2. Install dependencies
    ```
    npm install
    ```
@@ -72,12 +126,6 @@ A simple full-stack comment application with CRUD functions.
    ```
    npm run dev
    ```
-
----
-
-## Time & Next Steps
-
-I focused on implementing the core backend APIs and a clean, functional frontend that supports full CRUD operations. I also spent some additional time polishing the frontend UI (button styling and layout) to make the admin interactions clearer and easier to use.
 
 ---
 
