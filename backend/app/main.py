@@ -434,10 +434,26 @@ def report_comment(
         )
 
     db.refresh(report)
-    auto_hidden = ReportService.evaluate_auto_hide(db, comment_id)
-    if auto_hidden:
-        comment = get_comment_or_404(db, comment_id)
+
+    # Immediately move comment to pending_review so it appears in the admin queue
+    comment = get_comment_or_404(db, comment_id)
+    if comment.moderation_status == "approved":
+        comment.moderation_status = "pending_review"
+        comment.is_hidden = True
+        comment.moderation_reason = "Flagged by user report, pending admin review."
+        comment.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        ModerationService.create_log(
+            db,
+            comment_id=comment.id,
+            source="auto",
+            action="flagged_by_report",
+            result="pending_review",
+            flags=["user_report"],
+            reason=comment.moderation_reason,
+        )
         RankingService.refresh_topic_and_rankings(db, comment.topic_id)
+
     return report
 
 
