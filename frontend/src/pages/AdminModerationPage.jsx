@@ -7,9 +7,13 @@ export default function AdminModerationPage() {
   const [queue, setQueue] = useState([]);
   const [reports, setReports] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [processed, setProcessed] = useState([]);
+  const [approved, setApproved] = useState([]);
+  const [rejected, setRejected] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectCommentId, setRejectCommentId] = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   const loadAdminData = useCallback(async () => {
     if (!hasAdminToken()) return;
@@ -25,7 +29,14 @@ export default function AdminModerationPage() {
       setQueue(queueData || []);
       setReports(reportsData || []);
       setLogs(logsData || []);
-      setProcessed(processedData || []);
+      const approvedData = (processedData || []).filter(
+        (c) => c.moderation_status === "approved",
+      );
+      const rejectedData = (processedData || []).filter(
+        (c) => c.moderation_status === "rejected",
+      );
+      setApproved(approvedData);
+      setRejected(rejectedData);
       setError("");
     } catch (err) {
       setError(err.message || "Failed to load admin data");
@@ -71,20 +82,47 @@ export default function AdminModerationPage() {
     setQueue([]);
     setReports([]);
     setLogs([]);
-    setProcessed([]);
+    setApproved([]);
+    setRejected([]);
     setTokenInput("");
   }
 
-  async function act(commentId, action) {
+  async function act(commentId, action, reasonInput = null) {
     try {
+      const reason = reasonInput || `Admin action: ${action}`;
       await api.moderateComment(commentId, {
         action,
-        reason: `Admin action: ${action}`,
+        reason,
       });
       await loadAdminData();
     } catch (err) {
       setError(err.message || "Admin action failed");
     }
+  }
+
+  function openRejectModal(commentId) {
+    setRejectCommentId(commentId);
+    setRejectReason("");
+    setShowRejectModal(true);
+  }
+
+  async function submitReject() {
+    if (rejectCommentId) {
+      await act(
+        rejectCommentId,
+        "reject",
+        rejectReason.trim() || null
+      );
+      setShowRejectModal(false);
+      setRejectCommentId(null);
+      setRejectReason("");
+    }
+  }
+
+  function closeRejectModal() {
+    setShowRejectModal(false);
+    setRejectCommentId(null);
+    setRejectReason("");
   }
 
   async function reopenForReview(commentId) {
@@ -127,6 +165,13 @@ export default function AdminModerationPage() {
   }
 
   // Show moderation content when logged in
+  function scrollToSection(sectionId) {
+    const element = document.getElementById(sectionId);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
   return (
     <div className="page-wrap admin-page">
       <div className="admin-header">
@@ -141,8 +186,162 @@ export default function AdminModerationPage() {
       {error && <div className="error-box">{error}</div>}
       {loading && <div className="admin-loading">Loading...</div>}
 
+      {/* Sidebar Navigation */}
+      <div
+        style={{
+          position: "fixed",
+          left: "1.5rem",
+          top: "50%",
+          transform: "translateY(-50%)",
+          backgroundColor: "rgba(255, 255, 255, 0.85)",
+          backdropFilter: "blur(8px)",
+          padding: "0.75rem 0.5rem",
+          borderRadius: "6px",
+          border: "1px solid rgba(0, 0, 0, 0.06)",
+          zIndex: 100,
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+          <button
+            onClick={() => scrollToSection("pending-review")}
+            style={{
+              textAlign: "left",
+              padding: "0.4rem 0.6rem",
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              borderRadius: "3px",
+              fontSize: "0.85rem",
+              color: "#555",
+              transition: "all 0.2s",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = "rgba(0, 0, 0, 0.04)";
+              e.target.style.color = "#000";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = "transparent";
+              e.target.style.color = "#555";
+            }}
+          >
+            <span style={{ fontSize: "8px" }}>●</span> Pending
+          </button>
+          <button
+            onClick={() => scrollToSection("approved")}
+            style={{
+              textAlign: "left",
+              padding: "0.4rem 0.6rem",
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              borderRadius: "3px",
+              fontSize: "0.85rem",
+              color: "#555",
+              transition: "all 0.2s",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = "rgba(0, 0, 0, 0.04)";
+              e.target.style.color = "#000";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = "transparent";
+              e.target.style.color = "#555";
+            }}
+          >
+            <span style={{ fontSize: "8px" }}>●</span> Approved
+          </button>
+          <button
+            onClick={() => scrollToSection("rejected")}
+            style={{
+              textAlign: "left",
+              padding: "0.4rem 0.6rem",
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              borderRadius: "3px",
+              fontSize: "0.85rem",
+              color: "#555",
+              transition: "all 0.2s",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = "rgba(0, 0, 0, 0.04)";
+              e.target.style.color = "#000";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = "transparent";
+              e.target.style.color = "#555";
+            }}
+          >
+            <span style={{ fontSize: "8px" }}>●</span> Rejected
+          </button>
+          <button
+            onClick={() => scrollToSection("reported")}
+            style={{
+              textAlign: "left",
+              padding: "0.4rem 0.6rem",
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              borderRadius: "3px",
+              fontSize: "0.85rem",
+              color: "#555",
+              transition: "all 0.2s",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = "rgba(0, 0, 0, 0.04)";
+              e.target.style.color = "#000";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = "transparent";
+              e.target.style.color = "#555";
+            }}
+          >
+            <span style={{ fontSize: "8px" }}>●</span> Reports
+          </button>
+          <button
+            onClick={() => scrollToSection("activity-logs")}
+            style={{
+              textAlign: "left",
+              padding: "0.4rem 0.6rem",
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              borderRadius: "3px",
+              fontSize: "0.85rem",
+              color: "#555",
+              transition: "all 0.2s",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = "rgba(0, 0, 0, 0.04)";
+              e.target.style.color = "#000";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = "transparent";
+              e.target.style.color = "#555";
+            }}
+          >
+            <span style={{ fontSize: "8px" }}>●</span> Logs
+          </button>
+        </div>
+      </div>
+
       {/* Pending Review Queue */}
-      <section className="admin-panel-section">
+      <section id="pending-review" className="admin-panel-section">
         <div className="admin-section-header">
           <h2>Pending Review</h2>
           <span className="count-badge">{queue.length}</span>
@@ -169,6 +368,24 @@ export default function AdminModerationPage() {
                     {new Date(comment.created_at).toLocaleString()}
                   </span>
                 </div>
+                {comment.topic_title && (
+                  <div style={{ marginBottom: "8px", fontSize: "0.85rem" }}>
+                    <a
+                      href={`/topics/${comment.topic_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        color: "#0066cc",
+                        textDecoration: "none",
+                        fontWeight: "500",
+                      }}
+                      onMouseEnter={(e) => e.target.style.textDecoration = "underline"}
+                      onMouseLeave={(e) => e.target.style.textDecoration = "none"}
+                    >
+                      Source: {comment.topic_title}
+                    </a>
+                  </div>
+                )}
                 <p className="admin-comment-text">{comment.text}</p>
                 {comment.moderation_flags && (
                   <div className="admin-flags">
@@ -188,21 +405,9 @@ export default function AdminModerationPage() {
                   </button>
                   <button
                     className="admin-btn btn-reject"
-                    onClick={() => act(comment.id, "reject")}
+                    onClick={() => openRejectModal(comment.id)}
                   >
                     Reject
-                  </button>
-                  <button
-                    className="admin-btn btn-hide"
-                    onClick={() => act(comment.id, "hide")}
-                  >
-                    Hide
-                  </button>
-                  <button
-                    className="admin-btn btn-restore"
-                    onClick={() => act(comment.id, "restore")}
-                  >
-                    Restore
                   </button>
                 </div>
               </div>
@@ -211,35 +416,143 @@ export default function AdminModerationPage() {
         )}
       </section>
 
-      {/* Processed Comments */}
-      <section className="admin-panel-section">
+      {/* Approved Comments */}
+      <section id="approved" className="admin-panel-section">
         <div className="admin-section-header">
-          <h2>Processed</h2>
-          <span className="count-badge">{processed.length}</span>
+          <h2>Approved</h2>
+          <span className="count-badge">{approved.length}</span>
         </div>
-        {processed.length === 0 ? (
-          <p className="empty-state">No processed comments</p>
+        {approved.length === 0 ? (
+          <p className="empty-state">No approved comments</p>
         ) : (
           <div className="admin-cards">
-            {processed.map((comment) => (
+            {approved.map((comment) => (
               <div key={comment.id} className="admin-comment-card">
                 <div className="admin-comment-header">
                   <div className="admin-comment-meta">
                     <strong className="comment-author">
                       {comment.author_name}
                     </strong>
-                    <span
-                      className={`admin-status-badge status-${comment.moderation_status}`}
-                    >
-                      {comment.moderation_status}
-                    </span>
                     <span className="comment-id">#{comment.id}</span>
                   </div>
                   <span className="comment-time">
                     {new Date(comment.updated_at).toLocaleString()}
                   </span>
                 </div>
+                {comment.topic_title && (
+                  <div style={{ marginBottom: "8px", fontSize: "0.85rem" }}>
+                    <a
+                      href={`/topics/${comment.topic_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        color: "#0066cc",
+                        textDecoration: "none",
+                        fontWeight: "500",
+                      }}
+                      onMouseEnter={(e) => e.target.style.textDecoration = "underline"}
+                      onMouseLeave={(e) => e.target.style.textDecoration = "none"}
+                    >
+                      Source: {comment.topic_title}
+                    </a>
+                  </div>
+                )}
                 <p className="admin-comment-text">{comment.text}</p>
+                {comment.is_hidden && (
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      backgroundColor: "#fff3cd",
+                      borderLeft: "3px solid #ffc107",
+                      marginBottom: "12px",
+                      fontSize: "0.9rem",
+                    }}
+                  >
+                    Currently hidden from public view
+                  </div>
+                )}
+                <div className="admin-comment-actions">
+                  {comment.is_hidden ? (
+                    <button
+                      className="admin-btn btn-approve"
+                      onClick={() => act(comment.id, "restore")}
+                    >
+                      Restore
+                    </button>
+                  ) : (
+                    <button
+                      className="admin-btn btn-hide"
+                      onClick={() => act(comment.id, "hide")}
+                    >
+                      Hide
+                    </button>
+                  )}
+                  <button
+                    className="admin-btn btn-neutral"
+                    onClick={() => reopenForReview(comment.id)}
+                  >
+                    Reopen for Review
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Rejected Comments */}
+      <section id="rejected" className="admin-panel-section">
+        <div className="admin-section-header">
+          <h2>Rejected</h2>
+          <span className="count-badge">{rejected.length}</span>
+        </div>
+        {rejected.length === 0 ? (
+          <p className="empty-state">No rejected comments</p>
+        ) : (
+          <div className="admin-cards">
+            {rejected.map((comment) => (
+              <div key={comment.id} className="admin-comment-card">
+                <div className="admin-comment-header">
+                  <div className="admin-comment-meta">
+                    <strong className="comment-author">
+                      {comment.author_name}
+                    </strong>
+                    <span className="comment-id">#{comment.id}</span>
+                  </div>
+                  <span className="comment-time">
+                    {new Date(comment.updated_at).toLocaleString()}
+                  </span>
+                </div>
+                {comment.topic_title && (
+                  <div style={{ marginBottom: "8px", fontSize: "0.85rem" }}>
+                    <a
+                      href={`/topics/${comment.topic_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        color: "#0066cc",
+                        textDecoration: "none",
+                        fontWeight: "500",
+                      }}
+                      onMouseEnter={(e) => e.target.style.textDecoration = "underline"}
+                      onMouseLeave={(e) => e.target.style.textDecoration = "none"}
+                    >
+                      Source: {comment.topic_title}
+                    </a>
+                  </div>
+                )}
+                <p className="admin-comment-text">{comment.text}</p>
+                {comment.moderation_reason && (
+                  <div
+                    style={{
+                      fontSize: "0.85rem",
+                      color: "#666",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    <strong>Reason:</strong> {comment.moderation_reason}
+                  </div>
+                )}
                 <div className="admin-comment-actions">
                   <button
                     className="admin-btn btn-neutral"
@@ -255,7 +568,7 @@ export default function AdminModerationPage() {
       </section>
 
       {/* Reports Table */}
-      <section className="admin-panel-section">
+      <section id="reported" className="admin-panel-section">
         <div className="admin-section-header">
           <h2>Reported</h2>
           <span className="count-badge">{reports.length}</span>
@@ -287,7 +600,7 @@ export default function AdminModerationPage() {
       </section>
 
       {/* Logs Table */}
-      <section className="admin-panel-section">
+      <section id="activity-logs" className="admin-panel-section">
         <div className="admin-section-header">
           <h2>Activity Logs</h2>
           <span className="count-badge">{logs.length}</span>
@@ -317,6 +630,90 @@ export default function AdminModerationPage() {
           </div>
         )}
       </section>
+
+      {/* Reject Reason Modal */}
+      {showRejectModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              padding: "2rem",
+              borderRadius: "8px",
+              boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+              maxWidth: "500px",
+              width: "90%",
+            }}
+          >
+            <h2 style={{ marginTop: 0, marginBottom: "1rem" }}>
+              Provide Rejection Reason
+            </h2>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Enter the reason for rejection... (optional)"
+              style={{
+                width: "100%",
+                minHeight: "100px",
+                padding: "10px",
+                borderRadius: "4px",
+                border: "1px solid #ddd",
+                fontFamily: "inherit",
+                fontSize: "0.95rem",
+                boxSizing: "border-box",
+              }}
+            />
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                marginTop: "1.5rem",
+                justifyContent: "flex-end",
+              }}
+            >
+              <button
+                onClick={closeRejectModal}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: "4px",
+                  border: "1px solid #ddd",
+                  backgroundColor: "#f5f5f5",
+                  cursor: "pointer",
+                  fontSize: "0.95rem",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitReject}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: "4px",
+                  border: "none",
+                  backgroundColor: "#dc3545",
+                  color: "white",
+                  cursor: "pointer",
+                  fontSize: "0.95rem",
+                }}
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

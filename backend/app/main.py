@@ -62,6 +62,9 @@ async def lifespan(app: FastAPI):
         db = next(db_gen)
         logger.info("Triggering daily topic pipeline...")
         TopicSeedService.seed_daily_topics(db, date.today().isoformat())
+        logger.info("Preloading Detoxify model for comment moderation...")
+        ModerationService._get_detoxify_model()
+        logger.info("Detoxify model loaded successfully")
         logger.info("=== Application startup complete ===")
     except Exception as e:
         logger.error(f"Startup error: {e}", exc_info=True)
@@ -226,7 +229,11 @@ def list_topic_comments(topic_id: int, db: Session = Depends(get_db)):
     get_topic_or_404(db, topic_id)
     items = (
         db.query(Comment)
-        .filter(Comment.topic_id == topic_id)
+        .filter(
+            Comment.topic_id == topic_id,
+            Comment.moderation_status == "approved",
+            Comment.is_hidden.is_(False),
+        )
         .order_by(Comment.created_at.desc())
         .all()
     )
@@ -287,7 +294,23 @@ def create_comment(
             flags=moderation_result["flags"],
             reason=moderation_result["reason"],
         )
-        raise HTTPException(status_code=400, detail=moderation_result["reason"])
+
+        reject_flags = set(moderation_result.get("flags") or [])
+        if (
+            "rate_limit_30_seconds" in reject_flags
+            or "rate_limit_5_minutes" in reject_flags
+        ):
+            detail_message = "You are posting comments too quickly. Please wait a moment and try again."
+        else:
+            detail_message = (
+                "Your comment contains inappropriate language or harmful content. "
+                "Please use respectful language."
+            )
+
+        raise HTTPException(
+            status_code=400,
+            detail=detail_message,
+        )
 
     is_hidden = moderation_result["status"] == "pending_review"
     comment = Comment(
@@ -323,7 +346,7 @@ def create_comment(
     if moderation_result["status"] == "pending_review":
         return {
             "status": "pending_review",
-            "message": "Under review",
+            "message": "Your comment is awaiting moderation and will appear once reviewed.",
             "comment": comment,
         }
 
@@ -483,12 +506,19 @@ def moderation_queue(db: Session = Depends(get_db)):
     Approved/rejected comments move to processed list.
     """
     queue_items = (
-        db.query(Comment)
+        db.query(Comment, Topic.title)
+        .join(Topic, Comment.topic_id == Topic.id)
         .filter(Comment.moderation_status == "pending_review")
         .order_by(Comment.created_at.desc())
         .all()
     )
-    return queue_items
+    return [
+        {
+            **comment.__dict__,
+            "topic_title": title,
+        }
+        for comment, title in queue_items
+    ]
 
 
 @app.get(
@@ -502,13 +532,20 @@ def moderation_processed(db: Session = Depends(get_db)):
     Shows last 50 processed items, including rejected comments regardless of hidden status.
     """
     processed_items = (
-        db.query(Comment)
+        db.query(Comment, Topic.title)
+        .join(Topic, Comment.topic_id == Topic.id)
         .filter(Comment.moderation_status.in_(["approved", "rejected"]))
         .order_by(Comment.updated_at.desc())
         .limit(50)
         .all()
     )
-    return processed_items
+    return [
+        {
+            **comment.__dict__,
+            "topic_title": title,
+        }
+        for comment, title in processed_items
+    ]
 
 
 @app.post(
@@ -522,7 +559,7 @@ def reopen_comment(comment_id: int, db: Session = Depends(get_db)):
     """
     comment = get_comment_or_404(db, comment_id)
     comment.moderation_status = "pending_review"
-    comment.is_hidden = True
+    comment.is_hidden = False
     comment.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(comment)
@@ -563,8 +600,6 @@ def admin_moderate_comment(
         comment.is_hidden = True
     elif payload.action == "restore":
         comment.is_hidden = False
-        if comment.moderation_status == "rejected":
-            comment.moderation_status = "approved"
 
     comment.moderation_reason = payload.reason or comment.moderation_reason
     comment.updated_at = datetime.now(timezone.utc)

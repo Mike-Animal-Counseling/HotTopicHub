@@ -52,6 +52,22 @@ export default function TopicDetailPage() {
     loadAll();
   }, [loadAll, normalizedTopicId]);
 
+  // Auto-refresh comments every 10 seconds
+  useEffect(() => {
+    if (Number.isNaN(normalizedTopicId)) return;
+
+    const intervalId = setInterval(() => {
+      // Refresh data without showing loading indicator
+      api.getComments(normalizedTopicId).then((data) => {
+        setComments(data.items || []);
+      }).catch(() => {
+        // Silently fail on background refresh
+      });
+    }, 10000); // 10 seconds
+
+    return () => clearInterval(intervalId);
+  }, [normalizedTopicId]);
+
   async function submitComment() {
     const payload = {
       author_name: authorName.trim() || "Guest",
@@ -68,7 +84,10 @@ export default function TopicDetailPage() {
     try {
       const response = await api.createComment(normalizedTopicId, payload);
       if (response.status === "pending_review") {
-        setNotice("Under review");
+        setNotice(
+          response.message ||
+            "Your comment is awaiting moderation and will appear once reviewed.",
+        );
       } else {
         setNotice("Comment published");
       }
@@ -129,7 +148,6 @@ export default function TopicDetailPage() {
         ← Daily Hub
       </Link>
       {error && <div className="error-box">{error}</div>}
-      {notice && <div className="notice-box">{notice}</div>}
 
       {topic && (
         <>
@@ -226,6 +244,9 @@ export default function TopicDetailPage() {
         <button className="detail-submit-btn" onClick={submitComment}>
           Post comment
         </button>
+        {notice && (
+          <div className="notice-box detail-form-notice">{notice}</div>
+        )}
       </div>
 
       {/* ===== DISCUSSION ===== */}
@@ -249,11 +270,6 @@ export default function TopicDetailPage() {
               <strong className="comment-author">{comment.author_name}</strong>
               <span className="comment-time">
                 {new Date(comment.created_at).toLocaleString()}
-              </span>
-              <span
-                className={`comment-status status-${comment.moderation_status}`}
-              >
-                {comment.moderation_status}
               </span>
             </div>
             {comment.is_hidden ? (

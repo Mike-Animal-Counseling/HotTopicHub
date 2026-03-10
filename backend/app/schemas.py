@@ -114,6 +114,7 @@ class ReportOut(BaseModel):
 class ModerationQueueItem(BaseModel):
     id: int
     topic_id: int
+    topic_title: str | None = None
     author_name: str
     text: str
     image_url: str | None

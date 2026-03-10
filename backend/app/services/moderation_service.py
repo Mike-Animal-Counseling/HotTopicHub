@@ -1,5 +1,6 @@
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -7,19 +8,25 @@ from app.models import Comment, ModerationLog, Report
 
 
 class ModerationService:
-    LOW_RISK_PROFANITY = {"idiot", "stupid", "dumb"}
-    MEDIUM_HATE = {"hate", "harass", "racist", "sexist"}
-    HIGH_SEXUAL_VIOLENCE_SELF_HARM = {
-        "kill myself",
-        "suicide",
-        "bomb",
-        "shoot",
-        "rape",
-        "murder",
-    }
+    _detoxify_model: Optional[object] = None
+    TOXICITY_THRESHOLD_PENDING = 0.5  # Flag for review
+    TOXICITY_THRESHOLD_REJECT = 0.9  # Auto-reject (very high toxicity)
 
     SHORTENER_DOMAINS = {"bit.ly", "tinyurl.com", "t.co"}
     SUSPICIOUS_TLDS = {".xyz", ".top", ".click", ".work", ".zip"}
+
+    @staticmethod
+    def _get_detoxify_model():
+        """Lazy load Detoxify model on first use."""
+        if ModerationService._detoxify_model is None:
+            try:
+                from detoxify import Detoxify
+
+                ModerationService._detoxify_model = Detoxify("original", device="cpu")
+            except Exception as e:
+                print(f"Warning: Failed to load Detoxify model: {e}")
+                return None
+        return ModerationService._detoxify_model
 
     @staticmethod
     def extract_links(text: str) -> list[str]:
@@ -38,27 +45,57 @@ class ModerationService:
         return re.sub(r"\s+", " ", text.strip().lower())
 
     @staticmethod
+    def _check_toxicity(text: str) -> tuple[float, list[str]]:
+        """
+        Check text toxicity using Detoxify.
+        Returns: (toxicity_score, flags)
+        """
+        model = ModerationService._get_detoxify_model()
+        if not model:
+            # Fallback: if model fails to load, return 0 (no toxicity)
+            return 0.0, []
+
+        try:
+            results = model.predict(text)
+            # Detoxify returns scores for: toxicity, severe_toxicity, obscene, threat, insult, identity_attack
+            toxicity_score = results.get("toxicity", 0.0)
+
+            flags = []
+            if toxicity_score > ModerationService.TOXICITY_THRESHOLD_PENDING:
+                flags.append("detoxify_toxicity")
+
+            if results.get("severe_toxicity", 0) > 0.5:
+                flags.append("detoxify_severe_toxicity")
+            if results.get("threat", 0) > 0.5:
+                flags.append("detoxify_threat")
+            if results.get("identity_attack", 0) > 0.5:
+                flags.append("detoxify_identity_attack")
+
+            return toxicity_score, flags
+        except Exception as e:
+            print(f"Warning: Detoxify inference failed: {e}")
+            return 0.0, []
+
+    @staticmethod
     def run_text_rules(
         db: Session, topic_id: int, user_identifier: str, text: str
     ) -> dict:
         normalized = ModerationService._normalize_text(text)
         flags: list[str] = []
 
-        for bad_word in ModerationService.HIGH_SEXUAL_VIOLENCE_SELF_HARM:
-            if bad_word in normalized:
-                flags.append("high_risk_content")
-                return {
-                    "status": "rejected",
-                    "flags": sorted(set(flags)),
-                    "reason": "High-risk content detected.",
-                }
+        # Check toxicity using Detoxify
+        toxicity_score, toxicity_flags = ModerationService._check_toxicity(text)
+        flags.extend(toxicity_flags)
 
-        if any(word in normalized for word in ModerationService.MEDIUM_HATE):
-            flags.append("hate_or_harassment")
+        # Auto-reject if toxicity score is very high
+        if toxicity_score > ModerationService.TOXICITY_THRESHOLD_REJECT:
+            return {
+                "status": "rejected",
+                "flags": sorted(set(flags)),
+                "reason": f"High-risk content detected (toxicity: {toxicity_score:.2f}).",
+            }
 
-        if any(word in normalized for word in ModerationService.LOW_RISK_PROFANITY):
-            flags.append("profanity")
-
+        # Link checking
         links = ModerationService.extract_links(text)
         if len(links) > 2:
             flags.append("too_many_external_links")
@@ -72,6 +109,7 @@ class ModerationService:
         ):
             flags.append("suspicious_tld")
 
+        # Rate limiting checks
         now = datetime.now(timezone.utc)
         since_30s = now - timedelta(seconds=30)
         since_5m = now - timedelta(minutes=5)
@@ -111,6 +149,7 @@ class ModerationService:
         if repeated_text_count > 0:
             flags.append("duplicate_text_short_window")
 
+        # Apply rejection rules for rate limit and duplicate
         if "rate_limit_30_seconds" in flags or "rate_limit_5_minutes" in flags:
             return {
                 "status": "rejected",
@@ -125,15 +164,20 @@ class ModerationService:
                 "reason": "Duplicate text detected in a short time window.",
             }
 
+        # Apply pending review for toxicity or suspicious links/TLD
         if (
-            "hate_or_harassment" in flags
+            "detoxify_toxicity" in flags
             or "too_many_external_links" in flags
+            or "shortener_link" in flags
             or "suspicious_tld" in flags
+            or "detoxify_severe_toxicity" in flags
+            or "detoxify_threat" in flags
+            or "detoxify_identity_attack" in flags
         ):
             return {
                 "status": "pending_review",
                 "flags": sorted(set(flags)),
-                "reason": "Content requires moderator review.",
+                "reason": f"Content requires moderator review (toxicity: {toxicity_score:.2f}).",
             }
 
         return {
