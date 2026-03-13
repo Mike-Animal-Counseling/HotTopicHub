@@ -13,7 +13,12 @@ class RSSSourceAdapter(BaseSourceAdapter):
         self.source_name = source_name
         self.feed_url = feed_url
 
-    def fetch_top_items(self, limit: int) -> list[RawArticle]:
+    def fetch_top_items(
+        self,
+        limit: int,
+        window_start: datetime | None = None,
+        window_end: datetime | None = None,
+    ) -> list[RawArticle]:
         try:
             request = Request(
                 self.feed_url,
@@ -29,6 +34,10 @@ class RSSSourceAdapter(BaseSourceAdapter):
             if channel_items:
                 for entry in channel_items[:limit]:
                     published = self._parse_pub_date(self._text(entry.find("pubDate")))
+                    if window_start and published < window_start:
+                        continue
+                    if window_end and published >= window_end:
+                        continue
                     items.append(
                         RawArticle(
                             title=self._text(entry.find("title"), "Untitled"),
@@ -52,6 +61,11 @@ class RSSSourceAdapter(BaseSourceAdapter):
                     published_text = self._text(
                         entry.find("{http://www.w3.org/2005/Atom}published")
                     ) or self._text(entry.find("{http://www.w3.org/2005/Atom}updated"))
+                    published = self._parse_pub_date(published_text)
+                    if window_start and published < window_start:
+                        continue
+                    if window_end and published >= window_end:
+                        continue
                     items.append(
                         RawArticle(
                             title=self._text(
@@ -69,7 +83,7 @@ class RSSSourceAdapter(BaseSourceAdapter):
                             summary=self._text(
                                 entry.find("{http://www.w3.org/2005/Atom}summary")
                             ),
-                            published_time=self._parse_pub_date(published_text),
+                            published_time=published,
                         )
                     )
 

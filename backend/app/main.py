@@ -1,7 +1,8 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,12 +15,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from .database import engine, get_db
+from .database import engine, ensure_sqlite_schema, get_db
 from . import models
 from .models import (
     Comment,
     CommentLike,
-    DailyTopicBatch,
+    HourlyFeedBatch,
+    HourlyFeedItem,
     ModerationLog,
     Report,
     Topic,
@@ -33,45 +35,87 @@ from .schemas import (
     CommentListResponse,
     CommentOut,
     CommentUpdate,
-    DailyTopicBatchListResponse,
-    DailyTopicBatchOut,
+    DailyTopSignalOut,
+    DailyTopSignalsResponse,
+    DailyHistoryDayOut,
+    DailyHistoryListResponse,
+    HourlyFeedBatchListResponse,
+    HourlyFeedBatchOut,
+    HourlyFeedItemOut,
+    HourlyFeedResponse,
     ModerationLogOut,
     ModerationQueueItem,
     RankedCommentOut,
     ReportCreate,
     ReportOut,
-    SeedDailyResponse,
     TopicLikeRequest,
-    TopicListResponse,
     TopicOut,
 )
-from .services.moderation_service import ModerationService, ReportService
+from .services.moderation_service import ModerationService
 from .services.comment_ranking_service import CommentRankingService
+from .services.daily_top_signals_service import DailyTopSignalsService
+from .services.hourly_feed_service import HourlyFeedService
 from .services.ranking_service import RankingService
-from .services.topic_seed_service import TopicSeedService
+from .services.signal_topic_sync_service import SignalTopicSyncService
 
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev-admin-token")
 
 
+async def run_hourly_feed_refresh_loop():
+    while True:
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            HourlyFeedService.get_or_create_current_feed(db)
+            SignalTopicSyncService.sync_from_recent_hourly_feed(db)
+        except Exception as exc:
+            logger.error(f"Hourly feed refresh error: {exc}", exc_info=True)
+        finally:
+            db_gen.close()
+
+        now = datetime.now(timezone.utc)
+        next_hour = (now + timedelta(hours=1)).replace(
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        sleep_seconds = max((next_hour - now).total_seconds(), 60)
+        await asyncio.sleep(sleep_seconds)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    background_task = None
+    db_gen = None
     try:
         logger.info("=== Application startup ===")
         models.Base.metadata.create_all(bind=engine)
+        ensure_sqlite_schema()
         db_gen = get_db()
         db = next(db_gen)
-        logger.info("Triggering daily topic pipeline...")
-        TopicSeedService.seed_daily_topics(db, date.today().isoformat())
+        logger.info("Refreshing hourly realtime feed...")
+        HourlyFeedService.get_or_create_current_feed(db)
+        logger.info("Syncing signal topics from recent hourly feed...")
+        SignalTopicSyncService.sync_from_recent_hourly_feed(db)
         logger.info("Preloading Detoxify model for comment moderation...")
         ModerationService._get_detoxify_model()
         logger.info("Detoxify model loaded successfully")
+        background_task = asyncio.create_task(run_hourly_feed_refresh_loop())
         logger.info("=== Application startup complete ===")
     except Exception as e:
         logger.error(f"Startup error: {e}", exc_info=True)
     finally:
-        db_gen.close()
+        if db_gen is not None:
+            db_gen.close()
 
     yield
+
+    if background_task:
+        background_task.cancel()
+        try:
+            await background_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="Comments API", lifespan=lifespan)
@@ -90,15 +134,6 @@ def require_admin(x_admin_token: str | None = Header(default=None)):
         raise HTTPException(status_code=401, detail="Invalid admin token.")
 
 
-def normalize_date_key(date_value: str | None) -> str:
-    if not date_value:
-        return date.today().isoformat()
-    try:
-        return date.fromisoformat(date_value).isoformat()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD") from exc
-
-
 def get_topic_or_404(db: Session, topic_id: int) -> Topic:
     topic = db.query(Topic).filter(Topic.id == topic_id).first()
     if not topic:
@@ -113,55 +148,110 @@ def get_comment_or_404(db: Session, comment_id: int) -> Comment:
     return comment
 
 
+def serialize_feed_batch(batch: HourlyFeedBatch) -> HourlyFeedBatchOut:
+    return HourlyFeedBatchOut(
+        id=batch.id,
+        hour_key=batch.hour_key,
+        window_start=batch.window_start,
+        window_end=batch.window_end,
+        created_at=batch.created_at,
+        items_count=len(batch.items),
+    )
+
+
+def serialize_daily_top_signal(item) -> DailyTopSignalOut:
+    topic = item.topic
+    return DailyTopSignalOut(
+        id=topic.id,
+        title=topic.title,
+        source=topic.source,
+        source_url=topic.source_url,
+        canonical_url=topic.canonical_url,
+        sources=topic.sources,
+        published_time=topic.published_time,
+        summary=topic.summary,
+        key_insights=topic.key_insights,
+        why_it_matters=topic.why_it_matters,
+        technical_summary=topic.technical_summary,
+        likes_count=topic.likes_count,
+        comments_count=topic.comments_count,
+        source_clicks_count=topic.source_clicks_count,
+        engagement_score=item.engagement_score,
+        created_at=topic.created_at,
+    )
+
+
+def normalize_date_key(date_value: str) -> str:
+    try:
+        return datetime.fromisoformat(f"{date_value}T00:00:00+00:00").date().isoformat()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD") from exc
+
+
+def serialize_feed_item(db: Session, item: HourlyFeedItem) -> HourlyFeedItemOut:
+    topic = SignalTopicSyncService.find_topic_for_feed_item(db, item)
+    return HourlyFeedItemOut(
+        id=item.id,
+        batch_id=item.batch_id,
+        topic_id=topic.id if topic else None,
+        title=topic.title if topic else item.title,
+        summary=(topic.summary if topic and topic.summary else item.summary),
+        canonical_url=topic.canonical_url if topic else item.canonical_url,
+        source_url=topic.source_url if topic else item.source_url,
+        sources=topic.sources if topic else item.sources,
+        published_time=topic.published_time if topic else item.published_time,
+        key_insights=topic.key_insights if topic else None,
+        why_it_matters=topic.why_it_matters if topic else None,
+        technical_summary=topic.technical_summary if topic else None,
+        likes_count=topic.likes_count if topic else 0,
+        comments_count=topic.comments_count if topic else 0,
+        source_clicks_count=topic.source_clicks_count if topic else 0,
+        content_type=item.content_type,
+        builder_score=item.builder_score,
+        event_score=item.event_score,
+        newsworthiness_score=item.newsworthiness_score,
+        feed_score=item.feed_score,
+        created_at=item.created_at,
+    )
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
-@app.get("/api/topics", response_model=TopicListResponse)
-def list_topics(
-    date_key: str | None = Query(default=None, alias="date"),
-    db: Session = Depends(get_db),
-):
-    normalized_date = normalize_date_key(date_key)
-    items = (
-        db.query(Topic)
-        .filter(Topic.date_key == normalized_date, Topic.is_active.is_(True))
-        .order_by(Topic.daily_rank.asc(), Topic.score.desc())
-        .all()
-    )
+@app.get("/api/topics/daily-top-signals", response_model=DailyTopSignalsResponse)
+def get_daily_top_signals(db: Session = Depends(get_db)):
+    SignalTopicSyncService.sync_from_recent_hourly_feed(db)
+    ranked = DailyTopSignalsService.get_daily_top_signals(db)
+    items = [serialize_daily_top_signal(item) for item in ranked]
     return {"items": items}
 
 
-@app.get("/api/topics/trending", response_model=TopicListResponse)
-def list_trending_topics(
-    date_key: str | None = Query(default=None, alias="date"),
+@app.get("/api/topics/history", response_model=DailyHistoryListResponse)
+def get_daily_signal_history(
+    limit: int = Query(default=30, ge=1, le=180),
     db: Session = Depends(get_db),
 ):
-    normalized_date = normalize_date_key(date_key)
-    items = (
-        db.query(Topic)
-        .filter(Topic.date_key == normalized_date, Topic.is_active.is_(True))
-        .order_by(Topic.daily_rank.asc(), Topic.score.desc())
-        .limit(10)
-        .all()
-    )
-    return {"items": items}
-
-
-@app.get("/api/topics/history", response_model=DailyTopicBatchListResponse)
-def list_topic_history(db: Session = Depends(get_db)):
-    batches = db.query(DailyTopicBatch).order_by(DailyTopicBatch.date.desc()).all()
     items = [
-        DailyTopicBatchOut(
-            id=batch.id,
-            date=batch.date,
-            created_at=batch.created_at,
-            topics_count=len(batch.topics),
+        DailyHistoryDayOut(
+            date_key=item.date_key,
+            topics_count=item.topics_count,
+            latest_topic_at=item.latest_topic_at,
         )
-        for batch in batches
+        for item in DailyTopSignalsService.list_history_days(db, limit=limit)
     ]
     return {"items": items}
+
+
+@app.get("/api/topics/history/{date_key}", response_model=DailyTopSignalsResponse)
+def get_daily_signals_for_date(
+    date_key: str,
+    db: Session = Depends(get_db),
+):
+    normalized_date = normalize_date_key(date_key)
+    ranked = DailyTopSignalsService.get_signals_for_date(db, normalized_date)
+    return {"items": [serialize_daily_top_signal(item) for item in ranked]}
 
 
 @app.get("/api/topics/{topic_id}", response_model=TopicOut)
@@ -169,14 +259,80 @@ def get_topic(topic_id: int, db: Session = Depends(get_db)):
     return get_topic_or_404(db, topic_id)
 
 
-@app.post("/api/topics/seed-daily", response_model=SeedDailyResponse)
-def seed_daily_topics(
-    date_key: str | None = Query(default=None, alias="date"),
+@app.get("/api/feed/realtime", response_model=HourlyFeedResponse)
+def get_realtime_feed(
+    hour_key: str | None = Query(default=None, alias="hour"),
     db: Session = Depends(get_db),
 ):
-    normalized_date = normalize_date_key(date_key)
-    seeded_count = TopicSeedService.seed_daily_topics(db, normalized_date)
-    return {"date_key": normalized_date, "seeded_count": seeded_count}
+    if hour_key:
+        batch = (
+            db.query(HourlyFeedBatch)
+            .filter(HourlyFeedBatch.hour_key == hour_key)
+            .first()
+        )
+        if not batch:
+            raise HTTPException(status_code=404, detail="Hourly feed batch not found")
+        if not HourlyFeedService.batch_has_items(db, batch):
+            batch = HourlyFeedService.generate_hourly_feed(
+                db,
+                hour_key=hour_key,
+                force=True,
+            )
+    else:
+        batch = HourlyFeedService.get_or_create_current_feed(db)
+    SignalTopicSyncService.sync_from_recent_hourly_feed(db)
+
+    items = (
+        db.query(HourlyFeedItem)
+        .filter(HourlyFeedItem.batch_id == batch.id)
+        .order_by(HourlyFeedItem.feed_score.desc(), HourlyFeedItem.published_time.desc())
+        .all()
+    )
+    return {
+        "batch": serialize_feed_batch(batch),
+        "items": [serialize_feed_item(db, item) for item in items],
+    }
+
+
+@app.post("/api/feed/realtime/refresh", response_model=HourlyFeedResponse)
+def refresh_realtime_feed(
+    hour_key: str | None = Query(default=None, alias="hour"),
+    force: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
+    batch = HourlyFeedService.generate_hourly_feed(
+        db,
+        hour_key=hour_key,
+        force=force,
+    )
+    SignalTopicSyncService.sync_from_recent_hourly_feed(db)
+    items = (
+        db.query(HourlyFeedItem)
+        .filter(HourlyFeedItem.batch_id == batch.id)
+        .order_by(HourlyFeedItem.feed_score.desc(), HourlyFeedItem.published_time.desc())
+        .all()
+    )
+    return {
+        "batch": serialize_feed_batch(batch),
+        "items": [serialize_feed_item(db, item) for item in items],
+    }
+
+
+@app.get("/api/feed/history", response_model=HourlyFeedBatchListResponse)
+def list_feed_history(
+    limit: int = Query(default=24, ge=1, le=168),
+    db: Session = Depends(get_db),
+):
+    HourlyFeedService.prune_invalid_batches(db)
+    batches = (
+        db.query(HourlyFeedBatch)
+        .order_by(HourlyFeedBatch.window_end.desc())
+        .all()
+    )
+    valid_batches = [
+        batch for batch in batches if HourlyFeedService.batch_has_items(db, batch)
+    ][:limit]
+    return {"items": [serialize_feed_batch(batch) for batch in valid_batches]}
 
 
 @app.post("/api/topics/{topic_id}/like")
@@ -195,6 +351,18 @@ def like_topic(topic_id: int, payload: TopicLikeRequest, db: Session = Depends(g
         "ok": True,
         "topic_id": topic_id,
         "likes_count": topic.likes_count if topic else 0,
+    }
+
+
+@app.post("/api/topics/{topic_id}/source-click")
+def record_topic_source_click(topic_id: int, db: Session = Depends(get_db)):
+    topic = DailyTopSignalsService.record_source_click(db, topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    return {
+        "ok": True,
+        "topic_id": topic.id,
+        "source_clicks_count": topic.source_clicks_count,
     }
 
 

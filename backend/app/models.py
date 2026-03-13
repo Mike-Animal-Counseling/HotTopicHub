@@ -35,7 +35,6 @@ class Topic(Base):
     key_insights = Column(Text, nullable=True)
     why_it_matters = Column(Text, nullable=True)
     technical_summary = Column(Text, nullable=True)
-    batch_id = Column(Integer, ForeignKey("daily_topic_batches.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at = Column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
@@ -43,7 +42,9 @@ class Topic(Base):
 
     likes_count = Column(Integer, nullable=False, default=0)
     comments_count = Column(Integer, nullable=False, default=0)
+    source_clicks_count = Column(Integer, nullable=False, default=0)
     score = Column(Float, nullable=False, default=0)
+    primary_source = Column(String, nullable=True)
     daily_rank = Column(Integer, nullable=True, index=True)
 
     is_active = Column(Boolean, nullable=False, default=True, index=True)
@@ -55,7 +56,6 @@ class Topic(Base):
     comments = relationship(
         "Comment", back_populates="topic", cascade="all, delete-orphan"
     )
-    batch = relationship("DailyTopicBatch", back_populates="topics")
 
     @property
     def sources(self) -> list[str]:
@@ -67,16 +67,58 @@ class Topic(Base):
             return []
         return payload if isinstance(payload, list) else []
 
+    @property
+    def source(self) -> str | None:
+        if self.primary_source:
+            return self.primary_source
+        return self.sources[0] if self.sources else None
 
-class DailyTopicBatch(Base):
-    __tablename__ = "daily_topic_batches"
+
+class HourlyFeedBatch(Base):
+    __tablename__ = "hourly_feed_batches"
 
     id = Column(Integer, primary_key=True, index=True)
-    date = Column(String, nullable=False, unique=True, index=True)
+    hour_key = Column(String, nullable=False, unique=True, index=True)
+    window_start = Column(DateTime(timezone=True), nullable=False)
+    window_end = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
 
-    topics = relationship("Topic", back_populates="batch")
+    items = relationship(
+        "HourlyFeedItem", back_populates="batch", cascade="all, delete-orphan"
+    )
 
+
+class HourlyFeedItem(Base):
+    __tablename__ = "hourly_feed_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(
+        Integer, ForeignKey("hourly_feed_batches.id"), nullable=False, index=True
+    )
+    title = Column(String, nullable=False)
+    summary = Column(Text, nullable=True)
+    canonical_url = Column(String, nullable=True)
+    source_url = Column(String, nullable=True)
+    sources_json = Column(Text, nullable=True)
+    published_time = Column(DateTime(timezone=True), nullable=True, index=True)
+    content_type = Column(String, nullable=False, default="other")
+    builder_score = Column(Float, nullable=False, default=0)
+    event_score = Column(Float, nullable=False, default=0)
+    newsworthiness_score = Column(Float, nullable=False, default=0)
+    feed_score = Column(Float, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    batch = relationship("HourlyFeedBatch", back_populates="items")
+
+    @property
+    def sources(self) -> list[str]:
+        if not self.sources_json:
+            return []
+        try:
+            payload = json.loads(self.sources_json)
+        except Exception:
+            return []
+        return payload if isinstance(payload, list) else []
 
 class TopicLike(Base):
     __tablename__ = "topic_likes"

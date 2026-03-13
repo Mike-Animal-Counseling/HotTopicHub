@@ -21,6 +21,7 @@ AdminAction = Literal["approve", "reject", "hide", "restore"]
 class TopicOut(BaseModel):
     id: int
     title: str
+    source: str | None = None
     summary: str | None
     source_url: str | None
     canonical_url: str | None = None
@@ -30,11 +31,11 @@ class TopicOut(BaseModel):
     key_insights: str | None = None
     why_it_matters: str | None = None
     technical_summary: str | None = None
-    batch_id: int | None = None
     created_at: datetime
     updated_at: datetime
     likes_count: int
     comments_count: int
+    source_clicks_count: int = 0
     score: float
     daily_rank: int | None
     is_active: bool
@@ -144,30 +145,91 @@ class ModerationLogOut(BaseModel):
         from_attributes = True
 
 
-class SeedDailyResponse(BaseModel):
-    date_key: str
-    seeded_count: int
-
-
 class CommentCreateResponse(BaseModel):
     status: ModerationStatus
     message: str
     comment: CommentOut | None = None
 
 
-class TopicListResponse(BaseModel):
-    items: list[TopicOut]
-
-
-class DailyTopicBatchOut(BaseModel):
+class DailyTopSignalOut(BaseModel):
     id: int
-    date: str
+    title: str
+    source: str | None = None
+    source_url: str | None = None
+    canonical_url: str | None = None
+    sources: list[str] = Field(default_factory=list)
+    published_time: datetime | None = None
+    summary: str | None = None
+    key_insights: str | None = None
+    why_it_matters: str | None = None
+    technical_summary: str | None = None
+    likes_count: int
+    comments_count: int
+    source_clicks_count: int = 0
+    engagement_score: float
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DailyTopSignalsResponse(BaseModel):
+    items: list[DailyTopSignalOut]
+
+
+class DailyHistoryDayOut(BaseModel):
+    date_key: str
     topics_count: int
+    latest_topic_at: datetime | None = None
 
 
-class DailyTopicBatchListResponse(BaseModel):
-    items: list[DailyTopicBatchOut]
+class DailyHistoryListResponse(BaseModel):
+    items: list[DailyHistoryDayOut]
+
+
+class HourlyFeedItemOut(BaseModel):
+    id: int
+    batch_id: int
+    topic_id: int | None = None
+    title: str
+    summary: str | None
+    canonical_url: str | None = None
+    source_url: str | None = None
+    sources: list[str] = Field(default_factory=list)
+    published_time: datetime | None = None
+    key_insights: str | None = None
+    why_it_matters: str | None = None
+    technical_summary: str | None = None
+    likes_count: int = 0
+    comments_count: int = 0
+    source_clicks_count: int = 0
+    content_type: str
+    builder_score: float
+    event_score: float
+    newsworthiness_score: float
+    feed_score: float
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class HourlyFeedBatchOut(BaseModel):
+    id: int
+    hour_key: str
+    window_start: datetime
+    window_end: datetime
+    created_at: datetime
+    items_count: int
+
+
+class HourlyFeedResponse(BaseModel):
+    batch: HourlyFeedBatchOut
+    items: list[HourlyFeedItemOut]
+
+
+class HourlyFeedBatchListResponse(BaseModel):
+    items: list[HourlyFeedBatchOut]
 
 
 class CommentListResponse(BaseModel):

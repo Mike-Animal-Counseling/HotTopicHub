@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime
 
-from app.models import Base, Topic, Comment, DailyTopicBatch
+from app.models import Base, Topic, Comment
 from app.services.moderation_service import ModerationService
 
 # Setup test database (in-memory SQLite)
@@ -18,14 +18,9 @@ SessionLocal = sessionmaker(bind=engine)
 
 # Create a test topic
 db = SessionLocal()
-batch = DailyTopicBatch(date="2026-03-09")
-db.add(batch)
-db.commit()
-
 test_topic = Topic(
     title="Test Topic",
     summary="Test Summary",
-    batch_id=batch.id,
     date_key="2026-03-09",
     published_time=datetime.now(),
 )
