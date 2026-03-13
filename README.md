@@ -1,134 +1,180 @@
 # AI Builder Daily Hub
 
-A full-stack daily topic aggregation platform. Automatically fetches, deduplicates, clusters, and ranks the top 10 AI and builder-focused topics each day from multiple sources. Users can browse topics, leave comments, and like content. Admins can moderate comments through a dedicated dashboard.
+AI Builder Daily Hub is a full-stack AI signal product with three core surfaces:
 
-## Tech Stack
+- `Live Feed`: an hourly stream of fresh AI-builder topics collected from external sources
+- `Daily Top 10`: the strongest community-engaged topics from the last 24 hours inside the platform
+- `Daily History`: archived daily signal sets, browsable by date
 
-**Backend**
+The system separates source collection from community ranking:
 
-- FastAPI
-- SQLAlchemy
-- SQLite
+1. external sources feed the hourly stream
+2. recent feed items are synced into interactive `Topic` records
+3. users like, comment, and click through to sources
+4. the platform ranks the last 24 hours of community signals into a daily top list
 
-**Frontend**
+## Stack
 
-- React (Vite)
-- React Router
+- Backend: FastAPI, SQLAlchemy, SQLite
+- Frontend: React, Vite, React Router
 
----
+## Product Shape
 
-## Features
+### Live Feed
 
-**Topics**
+- Pulls from sources such as Hacker News, GitHub Trending, Product Hunt, Reddit, and selected RSS feeds
+- Scores and clusters source items into hourly batches
+- Works as the lightweight discovery surface
+- Clicking a title opens the discussion thread for that topic
 
-- Aggregates daily topics from HackerNews, GitHub Trending, Product Hunt, TechCrunch, and HuggingFace
-- Deduplication, title clustering, and AI keyword filtering pipeline
-- Source-balanced top 10 selection per day
-- Topic ranking by engagement score (likes + comments)
-- AI-generated summaries: key insights, why it matters, technical summary
-- Topic history archive by date
+### Daily Top 10
 
-**Comments**
+- Built from platform interaction, not external source rank alone
+- Ranking signals:
+  - likes
+  - comments
+  - source clicks
+  - recency boost
+- Caps output so one source cannot dominate the list
+- Shows richer editorial context:
+  - summary
+  - insight summary
+  - why it matters
 
-- Submit comments on any topic
-- Auto-moderation on submission (profanity, spam, rate limiting)
-- Like comments
-- Report comments
-- Ranked highlights (Top Insight, Top Resource, Top Technical Comment)
+### Daily History
 
-**Admin**
+- Lets users revisit prior daily top lists by date
+- Uses the current `Topic.date_key` model, not the old daily batch pipeline
 
-- Token-protected moderation dashboard
-- Pending review queue for flagged comments
-- Approve, reject, hide, restore actions
-- Processed list with reopen-for-review capability
-- Reports and activity log tables
+### Topic Detail
 
----
+- Full discussion page for a topic
+- Shows:
+  - summary
+  - key insights
+  - why it matters
+  - technical summary
+  - comments and ranked highlights
+  - source link
 
-## Data Seeding
+### Moderation
 
-- Comment seed file: `backend/data/comments.json`
-- The database auto-seeds on backend startup only if the comments table is empty.
-- Topics are generated automatically on startup via the pipeline (no manual seed needed).
+- Topic comments
+- Comment likes
+- Comment reports
+- Automatic moderation
+- Admin review queue and processed review list
 
----
+## Active Backend Routes
 
-## API Endpoints
+### Topics
 
-**Topics**
+- `GET /api/topics/daily-top-signals`
+- `GET /api/topics/history`
+- `GET /api/topics/history/{date_key}`
+- `GET /api/topics/{id}`
+- `POST /api/topics/{id}/like`
+- `DELETE /api/topics/{id}/like`
+- `POST /api/topics/{id}/source-click`
+- `GET /api/topics/{id}/comments`
+- `GET /api/topics/{id}/comments/highlights`
+- `POST /api/topics/{id}/comments`
 
-- `GET /api/topics` — list topics for a date
-- `GET /api/topics/trending` — top 10 topics for a date
-- `GET /api/topics/history` — list all daily batches
-- `GET /api/topics/{id}` — get a single topic
-- `POST /api/topics/seed-daily` — trigger pipeline manually
-- `POST /api/topics/{id}/like` — like a topic
-- `DELETE /api/topics/{id}/like` — unlike a topic
+### Comments
 
-**Comments**
+- `PATCH /api/comments/{id}`
+- `DELETE /api/comments/{id}`
+- `POST /api/comments/{id}/like`
+- `DELETE /api/comments/{id}/like`
+- `POST /api/comments/{id}/report`
 
-- `GET /api/topics/{id}/comments` — list all comments for a topic
-- `GET /api/topics/{id}/comments/highlights` — ranked top comments
-- `POST /api/topics/{id}/comments` — submit a comment
-- `PATCH /api/comments/{id}` — edit a comment
-- `DELETE /api/comments/{id}` — delete a comment
-- `POST /api/comments/{id}/like` — like a comment
-- `DELETE /api/comments/{id}/like` — unlike a comment
-- `POST /api/comments/{id}/report` — report a comment
+### Feed
 
-**Admin** (requires `X-Admin-Token` header)
+- `GET /api/feed/realtime`
+- `POST /api/feed/realtime/refresh`
+- `GET /api/feed/history`
 
-- `GET /api/admin/moderation/queue` — pending review comments
-- `GET /api/admin/moderation/processed` — recently approved/rejected comments
-- `GET /api/admin/moderation/logs` — activity logs
-- `GET /api/admin/reports` — open reports
-- `PATCH /api/admin/comments/{id}` — approve, reject, hide, or restore
-- `POST /api/admin/comments/{id}/reopen` — reopen for re-review
+### Admin
 
----
+Requires `X-ADMIN-TOKEN`.
 
-## Backend Setup
+- `GET /api/admin/moderation/queue`
+- `GET /api/admin/moderation/processed`
+- `GET /api/admin/moderation/logs`
+- `GET /api/admin/reports`
+- `PATCH /api/admin/comments/{id}`
+- `POST /api/admin/comments/{id}/reopen`
 
-1. Navigate to the backend directory
-   ```
-   cd .\Bobyard-Comment\backend\
-   ```
-2. Create and activate a virtual environment
-   ```
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   ```
-3. Install dependencies
-   ```
-   pip install -r requirements.txt
-   ```
-4. Start the backend server
-   ```
-   python -m uvicorn app.main:app --reload
-   ```
+## Current Backend Flow
 
-The topic pipeline runs automatically on startup. The default admin token is `dev-admin-token` (override with `ADMIN_TOKEN` environment variable).
+### Live Feed
 
----
+1. Fetch from source adapters
+2. Score raw articles for builder relevance
+3. Cluster related source items
+4. Select a diverse hourly batch
+5. Save `HourlyFeedBatch` and `HourlyFeedItem`
 
-## Frontend Setup
+### Topic Sync
 
-1. Navigate to the frontend directory
-   ```
-   cd .\Bobyard-Comment\frontend\
-   ```
-2. Install dependencies
-   ```
-   npm install
-   ```
-3. Start the development server
-   ```
-   npm run dev
-   ```
+1. Read recent `HourlyFeedItem`
+2. Match or create `Topic`
+3. Attach enrichment fields:
+   - summary
+   - key insights
+   - why it matters
+   - technical summary
 
----
+### Daily Top 10
 
-## Demo
+1. Read recent active `Topic`
+2. Compute engagement rank from platform activity
+3. Apply per-source cap
+4. Return top results for the last 24 hours
+
+## Main Files
+
+- Backend entrypoint: `backend/app/main.py`
+- Source collection: `backend/app/services/source_collection_service.py`
+- Hourly feed generation: `backend/app/services/hourly_feed_service.py`
+- Topic sync from feed: `backend/app/services/signal_topic_sync_service.py`
+- Topic enrichment: `backend/app/services/topic_enrichment_service.py`
+- Daily ranking: `backend/app/services/daily_top_signals_service.py`
+
+## Local Setup
+
+### Backend
+
+```powershell
+cd .\backend\
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
+```
+
+Notes:
+
+- The app refreshes the hourly feed on startup
+- Recent hourly items are synced into topics automatically
+- Default admin token: `dev-admin-token`
+- Active database: `backend/hot_topic_hub.db`
+
+### Frontend
+
+```powershell
+cd .\frontend\
+npm install
+npm run dev
+```
+
+## Current Direction
+
+- `Live Feed` is the lightweight discovery and discussion entry point
+- `Daily Top 10` is the curated community signal page
+- `Daily History` is the archive surface
+- `Topic Detail` is the full reading and discussion surface
+
+The old daily batch pipeline, old trending endpoints, and manual daily seed flow are no longer part of the active product path.
 
 ![Demo](demo.gif)
