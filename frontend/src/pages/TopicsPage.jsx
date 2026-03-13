@@ -1,50 +1,33 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
-
-const getMedalEmoji = (rank) => {
-  if (rank === 1) return "🥇";
-  if (rank === 2) return "🥈";
-  if (rank === 3) return "🥉";
-  return "";
-};
-
-const getEngagementTier = (rank) => {
-  if (rank === 1) return { label: "Viral", icon: "🔥", cls: "tier-viral" };
-  if (rank <= 3) return { label: "Hot", icon: "⚡", cls: "tier-hot" };
-  if (rank <= 6) return { label: "Rising", icon: "📈", cls: "tier-rising" };
-  return { label: "Notable", icon: "💡", cls: "tier-notable" };
-};
+import { DailyTopCard } from "../components/TopicSignalCard";
 
 export default function TopicsPage() {
-  const [searchParams] = useSearchParams();
-  const dateKey = searchParams.get("date") || "";
-  const [topics, setTopics] = useState([]);
+  const [dailySignals, setDailySignals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [hoveredId, setHoveredId] = useState(null);
 
-  const loadTopics = useCallback(async () => {
+  const loadSignals = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await api.getTopics(dateKey || undefined);
-      setTopics(data.items || []);
+      const signalsData = await api.getDailyTopSignals();
+      setDailySignals(signalsData.items || []);
       setError("");
     } catch (err) {
-      setError(err.message || "Failed to load topics");
+      setError(err.message || "Failed to load daily top signals");
     } finally {
       setLoading(false);
     }
-  }, [dateKey]);
+  }, []);
 
   useEffect(() => {
-    loadTopics();
-  }, [loadTopics]);
+    loadSignals();
+  }, [loadSignals]);
 
   if (loading) {
     return (
       <div className="page-wrap">
-        <div className="loading-spinner">⏳ Loading topics...</div>
+        <div className="loading-spinner">Loading daily top signals...</div>
       </div>
     );
   }
@@ -53,87 +36,31 @@ export default function TopicsPage() {
     <div className="page-wrap leaderboard-page">
       <div className="leaderboard-header">
         <div className="header-content">
-          <p className="eyebrow">
-            Daily Digest ·{" "}
-            {dateKey ||
-              new Date().toLocaleDateString("en-US", {
-                month: "long",
-                day: "numeric",
-                year: "numeric",
-              })}
-          </p>
-          <h1>AI Builder Daily Hub</h1>
-          <p className="subtitle">
-            {dateKey
-              ? `Showing topics for ${dateKey}`
-              : "Today's top 10 signals from across the builder ecosystem"}
-          </p>
+          <p className="eyebrow">Daily Top 10</p>
+          <h1>AI Builder Daily Top 10</h1>
+          <p className="subtitle">What builders engaged with most in the last 24 hours.</p>
         </div>
-        <Link to="/topics/history" className="history-link">
-          Archive
-        </Link>
       </div>
 
       {error && <div className="error-box">{error}</div>}
 
-      <div className="leaderboard-container">
-        {topics.map((topic, index) => {
-          const rank = index + 1;
-          const medal = getMedalEmoji(rank);
-          const isMedalist = rank <= 3;
-          const tier = getEngagementTier(rank);
-
-          return (
-            <Link
-              key={topic.id}
-              to={`/topics/${topic.id}`}
-              data-rank={rank}
-              className={`leaderboard-row ${isMedalist ? `rank-${rank}` : ""} ${
-                hoveredId === topic.id ? "active" : ""
-              }`}
-              onMouseEnter={() => setHoveredId(topic.id)}
-              onMouseLeave={() => setHoveredId(null)}
-            >
-              {isMedalist ? (
-                <div className="rank-badge medal-badge" data-rank={rank}>
-                  {medal}
-                </div>
-              ) : (
-                <div className="rank-badge rank-chip" data-rank={rank}>
-                  <span className="rank-chip-number">#{rank}</span>
-                </div>
-              )}
-
-              <div className="topic-content">
-                <h2 className="topic-title">{topic.title}</h2>
-                <p className="topic-summary">
-                  {topic.summary || "Aggregated from multiple sources"}
-                </p>
-
-                <div className="topic-meta">
-                  <div className="source-badges">
-                    {(topic.sources || []).map((source) => (
-                      <span key={source} className="source-badge">
-                        {source}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="stats-mini">
-                    <span className={`engagement-tier ${tier.cls}`}>
-                      {tier.label}
-                    </span>
-                    <span className="stat-item">{topic.likes_count} likes</span>
-                    <span className="stat-item">
-                      {topic.comments_count} comments
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
+      <section className="daily-signals-section">
+        <div className="daily-signals-list">
+          {dailySignals.length === 0 ? (
+            <div className="daily-signals-empty">
+              No engagement signals yet. Refresh the hourly feed, then add likes, comments, or source clicks.
+            </div>
+          ) : (
+            dailySignals.map((topic, index) => (
+              <DailyTopCard
+                key={`signal-${topic.id}`}
+                item={topic}
+                index={index}
+              />
+            ))
+          )}
+        </div>
+      </section>
     </div>
   );
 }

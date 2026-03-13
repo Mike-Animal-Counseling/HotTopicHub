@@ -1,129 +1,145 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { DailyTopCard } from "../components/TopicSignalCard";
+
+function formatDateLabel(value) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatRelative(value) {
+  if (!value) return "";
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return "";
+  const diffHours = Math.max(Math.round((Date.now() - timestamp) / 3600000), 0);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.round(diffHours / 24)}d ago`;
+}
 
 export default function TopicsHistoryPage() {
-  const [batches, setBatches] = useState([]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [history, setHistory] = useState([]);
+  const [topics, setTopics] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const selectedDate = searchParams.get("date") || "";
+
+  const loadHistory = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await api.getDailySignalHistory(45);
+      const items = data.items || [];
+      setHistory(items);
+      const initialDate = items[0]?.date_key || "";
+      if (!selectedDate && initialDate) {
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.set("date", initialDate);
+        setSearchParams(nextParams, { replace: true });
+      }
+      setError("");
+    } catch (err) {
+      setError(err.message || "Failed to load daily history");
+    } finally {
+      setLoading(false);
+    }
+  }, [searchParams, selectedDate, setSearchParams]);
+
+  const loadDateTopics = useCallback(async (dateKey) => {
+    if (!dateKey) {
+      setTopics([]);
+      return;
+    }
+    try {
+      const data = await api.getDailySignalsForDate(dateKey);
+      setTopics(data.items || []);
+      setError("");
+    } catch (err) {
+      setError(err.message || "Failed to load archived daily topics");
+    }
+  }, []);
 
   useEffect(() => {
-    async function loadHistory() {
-      try {
-        setLoading(true);
-        const data = await api.getTopicHistory();
-        setBatches(data.items || []);
-        setError("");
-      } catch (err) {
-        setError(err.message || "Failed to load history");
-      } finally {
-        setLoading(false);
-      }
-    }
     loadHistory();
-  }, []);
+  }, [loadHistory]);
+
+  useEffect(() => {
+    if (selectedDate) {
+      loadDateTopics(selectedDate);
+    }
+  }, [loadDateTopics, selectedDate]);
+
+  const selectedLabel = useMemo(
+    () => (selectedDate ? formatDateLabel(selectedDate) : "No day selected"),
+    [selectedDate],
+  );
 
   if (loading) {
     return (
-      <div className="page-wrap history-page">
-        <div
-          style={{
-            textAlign: "center",
-            padding: "3rem 1rem",
-            color: "#A8A29E",
-          }}
-        >
-          Loading archive...
-        </div>
+      <div className="page-wrap leaderboard-page">
+        <div className="loading-spinner">Loading daily history...</div>
       </div>
     );
   }
 
-  const formatDate = (dateStr) => {
-    const d = new Date(dateStr + "T00:00:00");
-    return d.toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  };
-
-  const formatTime = (isoStr) => {
-    const d = new Date(isoStr);
-    return d.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
   return (
-    <div className="page-wrap history-page">
-      {/* Hero Header */}
-      <div className="history-hero">
-        <p className="eyebrow">ARCHIVE</p>
-        <h1 className="history-title">Daily Topic History</h1>
-        <p className="history-subtitle">
-          Browse and explore past daily topic batches
-        </p>
+    <div className="page-wrap leaderboard-page history-shell">
+      <div className="leaderboard-header history-header">
+        <div className="header-content">
+          <p className="eyebrow">Archive</p>
+          <h1>Daily History</h1>
+          <p className="subtitle">Browse past daily signal sets by day.</p>
+        </div>
       </div>
 
-      {error && (
-        <div
-          style={{
-            background: "#FEF2F2",
-            border: "1px solid #FECACA",
-            color: "#991B1B",
-            padding: "1rem 1.25rem",
-            borderRadius: "8px",
-            marginBottom: "2rem",
-            fontSize: "0.95rem",
-          }}
-        >
-          {error}
+      {error && <div className="error-box">{error}</div>}
+
+      <section className="history-strip">
+        <div className="history-strip-header">
+          <span className="history-strip-label">Days</span>
+          <span className="history-strip-current">{selectedLabel}</span>
         </div>
-      )}
+        <div className="history-chip-list">
+          {history.map((item) => {
+            const isActive = item.date_key === selectedDate;
+            return (
+              <button
+                key={item.date_key}
+                type="button"
+                className={`history-chip ${isActive ? "active" : ""}`}
+                onClick={() => {
+                  const nextParams = new URLSearchParams(searchParams);
+                  nextParams.set("date", item.date_key);
+                  setSearchParams(nextParams);
+                }}
+              >
+                <strong>{formatDateLabel(item.date_key)}</strong>
+                <span>{item.topics_count} topics</span>
+                <small>{formatRelative(item.latest_topic_at)}</small>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
-      {/* Timeline */}
-      {batches.length > 0 ? (
-        <div className="history-timeline">
-          {batches.map((batch, index) => (
-            <div key={batch.id} className="timeline-item">
-              {/* Timeline Dot and Line */}
-              <div className="timeline-marker">
-                <div className="timeline-dot"></div>
-                {index < batches.length - 1 && (
-                  <div className="timeline-line"></div>
-                )}
-              </div>
-
-              {/* Timeline Card */}
-              <Link className="history-card" to={`/topics?date=${batch.date}`}>
-                <div className="history-card-header">
-                  <span className="history-date">{formatDate(batch.date)}</span>
-                </div>
-                <p className="history-card-label">Daily archive</p>
-                <p className="history-card-time">
-                  Generated at {formatTime(batch.created_at)}
-                </p>
-              </Link>
+      <section className="history-results">
+        <div className="daily-signals-list">
+          {topics.length === 0 ? (
+            <div className="daily-signals-empty">
+              No archived topics for this date yet.
             </div>
-          ))}
+          ) : (
+            topics.map((topic, index) => (
+              <DailyTopCard key={`${topic.id}-${selectedDate}`} item={topic} index={index} />
+            ))
+          )}
         </div>
-      ) : (
-        <div className="history-empty">
-          <p>No archived topic batches yet</p>
-          <p
-            style={{
-              fontSize: "0.9rem",
-              color: "#A8A29E",
-              marginTop: "0.5rem",
-            }}
-          >
-            Check back when daily topics are generated
-          </p>
-        </div>
-      )}
+      </section>
     </div>
   );
 }

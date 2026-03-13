@@ -21,13 +21,33 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  getTopics: (dateKey) =>
-    request(`/api/topics/trending${dateKey ? `?date=${dateKey}` : ""}`),
-  getTopicHistory: () => request("/api/topics/history"),
-  getTopic: (topicId) => request(`/api/topics/${topicId}`),
-  seedTopics: (dateKey) =>
-    request(`/api/topics/seed-daily${dateKey ? `?date=${dateKey}` : ""}`, {
+  getDailyTopSignals: () => request("/api/topics/daily-top-signals"),
+  getDailySignalHistory: (limit = 30) =>
+    request(`/api/topics/history?limit=${encodeURIComponent(limit)}`),
+  getDailySignalsForDate: (dateKey) =>
+    request(`/api/topics/history/${encodeURIComponent(dateKey)}`),
+  getRealtimeFeed: (hourKey) =>
+    request(
+      `/api/feed/realtime${hourKey ? `?hour=${encodeURIComponent(hourKey)}` : ""}`,
+    ),
+  refreshRealtimeFeed: (hourKey, force = true) => {
+    const params = [
+      hourKey ? `hour=${encodeURIComponent(hourKey)}` : "",
+      force ? "force=true" : "",
+    ]
+      .filter(Boolean)
+      .join("&");
+    return request(`/api/feed/realtime/refresh${params ? `?${params}` : ""}`, {
       method: "POST",
+    });
+  },
+  getFeedHistory: (limit = 24) =>
+    request(`/api/feed/history?limit=${encodeURIComponent(limit)}`),
+  getTopic: (topicId) => request(`/api/topics/${topicId}`),
+  recordTopicSourceClick: (topicId) =>
+    request(`/api/topics/${topicId}/source-click`, {
+      method: "POST",
+      keepalive: true,
     }),
   likeTopic: (topicId, userIdentifier) =>
     request(`/api/topics/${topicId}/like`, {

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 
 const DEFAULT_USER = "guest-user";
 
 export default function TopicDetailPage() {
   const { topicId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [topic, setTopic] = useState(null);
   const [comments, setComments] = useState([]);
   const [rankedComments, setRankedComments] = useState([]);
@@ -19,6 +21,8 @@ export default function TopicDetailPage() {
   const [imageUrl, setImageUrl] = useState("");
 
   const normalizedTopicId = useMemo(() => Number(topicId), [topicId]);
+  const backTo = location.state?.backTo || "/topics";
+  const backLabel = location.state?.backLabel || "Back to Hub";
 
   const loadAll = useCallback(async () => {
     try {
@@ -52,18 +56,16 @@ export default function TopicDetailPage() {
     loadAll();
   }, [loadAll, normalizedTopicId]);
 
-  // Auto-refresh comments every 10 seconds
   useEffect(() => {
     if (Number.isNaN(normalizedTopicId)) return;
 
     const intervalId = setInterval(() => {
-      // Refresh data without showing loading indicator
-      api.getComments(normalizedTopicId).then((data) => {
-        setComments(data.items || []);
-      }).catch(() => {
-        // Silently fail on background refresh
-      });
-    }, 10000); // 10 seconds
+      api.getComments(normalizedTopicId)
+        .then((data) => {
+          setComments(data.items || []);
+        })
+        .catch(() => {});
+    }, 10000);
 
     return () => clearInterval(intervalId);
   }, [normalizedTopicId]);
@@ -101,14 +103,15 @@ export default function TopicDetailPage() {
 
   async function handleTopicLike() {
     try {
-      await api.likeTopic(
-        normalizedTopicId,
-        userIdentifier.trim() || DEFAULT_USER,
-      );
+      await api.likeTopic(normalizedTopicId, userIdentifier.trim() || DEFAULT_USER);
       await loadAll();
     } catch (err) {
       setNotice(err.message || "Failed to like topic");
     }
+  }
+
+  function handleSourceClick() {
+    api.recordTopicSourceClick(normalizedTopicId).catch(() => {});
   }
 
   async function likeComment(commentId) {
@@ -144,14 +147,17 @@ export default function TopicDetailPage() {
 
   return (
     <div className="page-wrap detail-page">
-      <Link to="/topics" className="detail-back-link">
-        ← Daily Hub
-      </Link>
+      <button
+        type="button"
+        className="detail-back-link"
+        onClick={() => navigate(backTo)}
+      >
+        {backLabel}
+      </button>
       {error && <div className="error-box">{error}</div>}
 
       {topic && (
         <>
-          {/* ===== HERO ===== */}
           <div className="detail-hero">
             <div className="detail-hero-meta">
               {(topic.sources || []).map((source) => (
@@ -160,9 +166,7 @@ export default function TopicDetailPage() {
                 </span>
               ))}
               {topic.daily_rank && (
-                <span className="detail-rank-chip">
-                  #{topic.daily_rank} today
-                </span>
+                <span className="detail-rank-chip">#{topic.daily_rank} today</span>
               )}
             </div>
             <h1 className="detail-title">{topic.title}</h1>
@@ -171,23 +175,24 @@ export default function TopicDetailPage() {
               <button className="detail-like-btn" onClick={handleTopicLike}>
                 {topic.likes_count} likes
               </button>
+              <span className="detail-stat">{topic.comments_count} comments</span>
               <span className="detail-stat">
-                {topic.comments_count} comments
+                {topic.source_clicks_count || 0} source clicks
               </span>
-              {topic.canonical_url && (
+              {(topic.canonical_url || topic.source_url) && (
                 <a
-                  href={topic.canonical_url}
+                  href={topic.canonical_url || topic.source_url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="detail-source-link"
+                  onClick={handleSourceClick}
                 >
-                  View source ↗
+                  View source ->
                 </a>
               )}
             </div>
           </div>
 
-          {/* ===== INSIGHTS GRID ===== */}
           <div className="detail-insights-grid">
             {topic.key_insights && (
               <div className="detail-insight-card">
@@ -211,7 +216,6 @@ export default function TopicDetailPage() {
         </>
       )}
 
-      {/* ===== COMMENT FORM ===== */}
       <div className="detail-comment-form">
         <h2 className="detail-section-title">Leave a comment</h2>
         <div className="detail-form-row">
@@ -232,7 +236,7 @@ export default function TopicDetailPage() {
           className="detail-textarea"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Share your thoughts…"
+          placeholder="Share your thoughts..."
           rows={3}
         />
         <input
@@ -244,12 +248,9 @@ export default function TopicDetailPage() {
         <button className="detail-submit-btn" onClick={submitComment}>
           Post comment
         </button>
-        {notice && (
-          <div className="notice-box detail-form-notice">{notice}</div>
-        )}
+        {notice && <div className="notice-box detail-form-notice">{notice}</div>}
       </div>
 
-      {/* ===== DISCUSSION ===== */}
       <div className="detail-comments-block">
         <h2 className="detail-section-title">Discussion</h2>
 
