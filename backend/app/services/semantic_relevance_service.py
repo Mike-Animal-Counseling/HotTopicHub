@@ -176,6 +176,19 @@ class SemanticRelevanceService:
         return cache
 
     @staticmethod
+    def cosine_similarity(text_a: str, text_b: str) -> float:
+        normalized_a = SemanticRelevanceService._normalize(text_a)
+        normalized_b = SemanticRelevanceService._normalize(text_b)
+        if not normalized_a or not normalized_b:
+            return 0.0
+
+        embedding_a = list(SemanticRelevanceService._encode_text(normalized_a))
+        embedding_b = list(SemanticRelevanceService._encode_text(normalized_b))
+        if not embedding_a or not embedding_b:
+            return 0.0
+        return round(SemanticRelevanceService._cosine(embedding_a, embedding_b), 4)
+
+    @staticmethod
     def score_text(text: str, source: str) -> dict[str, float | str]:
         normalized = SemanticRelevanceService._normalize(text)
         embedding = list(SemanticRelevanceService._encode_text(normalized))

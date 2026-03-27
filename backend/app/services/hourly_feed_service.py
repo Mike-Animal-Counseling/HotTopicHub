@@ -4,6 +4,7 @@ import json
 import math
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import HourlyFeedBatch, HourlyFeedItem
@@ -120,15 +121,22 @@ class HourlyFeedService:
 
     @staticmethod
     def _delete_existing_batch(db: Session, hour_key: str) -> None:
-        batch = (
+        (
+            db.query(HourlyFeedBatch)
+            .filter(HourlyFeedBatch.hour_key == hour_key)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+
+    @staticmethod
+    def _get_batch_by_hour(
+        db: Session, hour_key: str
+    ) -> HourlyFeedBatch | None:
+        return (
             db.query(HourlyFeedBatch)
             .filter(HourlyFeedBatch.hour_key == hour_key)
             .first()
         )
-        if not batch:
-            return
-        db.delete(batch)
-        db.commit()
 
     @staticmethod
     def batch_has_items(db: Session, batch: HourlyFeedBatch | None) -> bool:
@@ -166,11 +174,7 @@ class HourlyFeedService:
         normalized_hour, window_start, window_end = HourlyFeedService._resolve_window(
             hour_key
         )
-        existing = (
-            db.query(HourlyFeedBatch)
-            .filter(HourlyFeedBatch.hour_key == normalized_hour)
-            .first()
-        )
+        existing = HourlyFeedService._get_batch_by_hour(db, normalized_hour)
         if existing and not force and HourlyFeedService.batch_has_items(db, existing):
             return existing
         if existing:
@@ -214,50 +218,55 @@ class HourlyFeedService:
             window_start=window_start,
             window_end=window_end,
         )
-        db.add(batch)
-        db.flush()
+        try:
+            db.add(batch)
+            db.flush()
 
-        for cluster, feed_score in selected:
-            ranked_articles = sorted(
-                cluster.articles,
-                key=lambda article: (
-                    article.newsworthiness_score,
-                    article.event_score,
-                    article.builder_score,
-                ),
-                reverse=True,
-            )
-            lead = ranked_articles[0]
-            item = HourlyFeedItem(
-                batch_id=batch.id,
-                title=cluster.title,
-                summary=lead.summary,
-                canonical_url=cluster.canonical_url,
-                source_url=lead.url,
-                sources_json=json.dumps(cluster.sources),
-                published_time=cluster.published_time or lead.published_time,
-                content_type=TopicScoringService.cluster_content_type(cluster),
-                builder_score=max(article.builder_score for article in cluster.articles),
-                event_score=max(article.event_score for article in cluster.articles),
-                newsworthiness_score=max(
-                    article.newsworthiness_score for article in cluster.articles
-                ),
-                feed_score=feed_score,
-            )
-            db.add(item)
+            for cluster, feed_score in selected:
+                ranked_articles = sorted(
+                    cluster.articles,
+                    key=lambda article: (
+                        article.newsworthiness_score,
+                        article.event_score,
+                        article.builder_score,
+                    ),
+                    reverse=True,
+                )
+                lead = ranked_articles[0]
+                item = HourlyFeedItem(
+                    batch_id=batch.id,
+                    title=cluster.title,
+                    summary=lead.summary,
+                    canonical_url=cluster.canonical_url,
+                    source_url=lead.url,
+                    sources_json=json.dumps(cluster.sources),
+                    published_time=cluster.published_time or lead.published_time,
+                    content_type=TopicScoringService.cluster_content_type(cluster),
+                    builder_score=max(
+                        article.builder_score for article in cluster.articles
+                    ),
+                    event_score=max(article.event_score for article in cluster.articles),
+                    newsworthiness_score=max(
+                        article.newsworthiness_score for article in cluster.articles
+                    ),
+                    feed_score=feed_score,
+                )
+                db.add(item)
 
-        db.commit()
-        db.refresh(batch)
-        return batch
+            db.commit()
+            db.refresh(batch)
+            return batch
+        except IntegrityError:
+            db.rollback()
+            existing = HourlyFeedService._get_batch_by_hour(db, normalized_hour)
+            if existing:
+                return existing
+            raise
 
     @staticmethod
     def get_or_create_current_feed(db: Session) -> HourlyFeedBatch:
         normalized_hour = HourlyFeedService._normalize_hour_key()
-        existing = (
-            db.query(HourlyFeedBatch)
-            .filter(HourlyFeedBatch.hour_key == normalized_hour)
-            .first()
-        )
+        existing = HourlyFeedService._get_batch_by_hour(db, normalized_hour)
         if existing and HourlyFeedService.batch_has_items(db, existing):
             return existing
         if existing and not HourlyFeedService.batch_has_items(db, existing):

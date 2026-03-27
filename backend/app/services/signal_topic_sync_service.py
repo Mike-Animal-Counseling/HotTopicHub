@@ -13,6 +13,20 @@ class SignalTopicSyncService:
     LOOKBACK_HOURS = 24
 
     @staticmethod
+    def _topic_has_enrichment(topic: Topic | None) -> bool:
+        if topic is None:
+            return False
+        return all(
+            bool(value and value.strip())
+            for value in (
+                topic.summary,
+                topic.key_insights,
+                topic.why_it_matters,
+                topic.technical_summary,
+            )
+        )
+
+    @staticmethod
     def _coerce_datetime(value: datetime | None) -> datetime:
         if value is None:
             return datetime.now(timezone.utc)
@@ -26,23 +40,65 @@ class SignalTopicSyncService:
         return sources[0] if sources else None
 
     @staticmethod
-    def _find_existing_topic(db: Session, item: HourlyFeedItem) -> Topic | None:
+    def _topic_identity_candidates(db: Session, item: HourlyFeedItem) -> list[Topic]:
+        seen_ids: set[int] = set()
+        candidates: list[Topic] = []
+
+        def add_topics(topics: list[Topic]) -> None:
+            for topic in topics:
+                if topic.id in seen_ids:
+                    continue
+                seen_ids.add(topic.id)
+                candidates.append(topic)
+
         if item.canonical_url:
-            topic = db.query(Topic).filter(Topic.canonical_url == item.canonical_url).first()
-            if topic:
-                return topic
+            add_topics(
+                db.query(Topic).filter(Topic.canonical_url == item.canonical_url).all()
+            )
         if item.source_url:
-            topic = db.query(Topic).filter(Topic.source_url == item.source_url).first()
-            if topic:
-                return topic
-        return (
+            add_topics(db.query(Topic).filter(Topic.source_url == item.source_url).all())
+        add_topics(
             db.query(Topic)
             .filter(
                 Topic.title == item.title,
                 Topic.primary_source == SignalTopicSyncService._resolve_primary_source(item),
             )
-            .first()
+            .all()
         )
+
+        candidates.sort(
+            key=lambda topic: (
+                topic.likes_count,
+                topic.comments_count,
+                topic.source_clicks_count,
+                topic.updated_at,
+                -topic.id,
+            ),
+            reverse=True,
+        )
+        return candidates
+
+    @staticmethod
+    def _merge_duplicate_topics(
+        db: Session,
+        primary: Topic,
+        duplicates: list[Topic],
+    ) -> None:
+        for duplicate in duplicates:
+            if duplicate.id == primary.id:
+                continue
+            duplicate.is_active = False
+            duplicate.daily_rank = None
+
+    @staticmethod
+    def _find_existing_topic(db: Session, item: HourlyFeedItem) -> Topic | None:
+        candidates = SignalTopicSyncService._topic_identity_candidates(db, item)
+        if not candidates:
+            return None
+        primary = candidates[0]
+        if len(candidates) > 1:
+            SignalTopicSyncService._merge_duplicate_topics(db, primary, candidates[1:])
+        return primary
 
     @staticmethod
     def find_topic_for_feed_item(db: Session, item: HourlyFeedItem) -> Topic | None:
@@ -52,7 +108,8 @@ class SignalTopicSyncService:
     def sync_from_recent_hourly_feed(
         db: Session,
         now: datetime | None = None,
-    ) -> int:
+        force_reenrich: bool = False,
+    ) -> dict[str, int]:
         now = SignalTopicSyncService._coerce_datetime(now)
         window_start = now - timedelta(hours=SignalTopicSyncService.LOOKBACK_HOURS)
         items = (
@@ -65,8 +122,15 @@ class SignalTopicSyncService:
             .all()
         )
 
-        synced_count = 0
+        stats = {
+            "processed_count": 0,
+            "created_count": 0,
+            "updated_count": 0,
+            "enriched_count": 0,
+            "reused_count": 0,
+        }
         for item in items:
+            stats["processed_count"] += 1
             topic = SignalTopicSyncService._find_existing_topic(db, item)
             created_at = SignalTopicSyncService._coerce_datetime(item.created_at)
             published_time = SignalTopicSyncService._coerce_datetime(
@@ -74,7 +138,25 @@ class SignalTopicSyncService:
             )
             sources = item.sources
             primary_source = SignalTopicSyncService._resolve_primary_source(item)
-            enrichment = TopicEnrichmentService.build_from_feed_item(item)
+            reused_enrichment = (
+                topic is not None
+                and not force_reenrich
+                and SignalTopicSyncService._topic_has_enrichment(topic)
+            )
+            enrichment = (
+                {
+                    "summary": topic.summary,
+                    "key_insights": topic.key_insights,
+                    "why_it_matters": topic.why_it_matters,
+                    "technical_summary": topic.technical_summary,
+                }
+                if reused_enrichment
+                else TopicEnrichmentService.build_from_feed_item(item)
+            )
+            if reused_enrichment:
+                stats["reused_count"] += 1
+            else:
+                stats["enriched_count"] += 1
 
             if topic is None:
                 topic = Topic(
@@ -100,7 +182,7 @@ class SignalTopicSyncService:
                     date_key=created_at.date().isoformat(),
                 )
                 db.add(topic)
-                synced_count += 1
+                stats["created_count"] += 1
                 continue
 
             topic.title = item.title
@@ -115,6 +197,7 @@ class SignalTopicSyncService:
             topic.technical_summary = enrichment["technical_summary"]
             topic.updated_at = now
             topic.is_active = True
+            stats["updated_count"] += 1
 
         db.commit()
-        return synced_count
+        return stats

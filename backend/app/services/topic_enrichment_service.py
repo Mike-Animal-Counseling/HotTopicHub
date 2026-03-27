@@ -3,6 +3,8 @@ from __future__ import annotations
 import html
 import re
 
+from app.services.ai_enrichment_service import AIEnrichmentService
+
 
 class TopicEnrichmentService:
     @staticmethod
@@ -25,6 +27,13 @@ class TopicEnrichmentService:
 
     @staticmethod
     def build_from_feed_item(item) -> dict[str, str | None]:
+        ai_enrichment = AIEnrichmentService.build_enrichment(item)
+        if ai_enrichment:
+            return ai_enrichment
+        return TopicEnrichmentService.build_fallback_from_feed_item(item)
+
+    @staticmethod
+    def build_fallback_from_feed_item(item) -> dict[str, str | None]:
         sources = item.sources or []
         primary_source = sources[0] if sources else "the live feed"
         content_label = TopicEnrichmentService._content_label(item.content_type)

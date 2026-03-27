@@ -118,6 +118,7 @@ class DailyTopSignalsService:
         limit: int = MAX_RESULTS,
     ) -> list[RankedSignal]:
         now = DailyTopSignalsService._coerce_datetime(now)
+        seen_topic_keys: set[str] = set()
         scored = [
             RankedSignal(topic=topic, engagement_score=DailyTopSignalsService.compute_score(topic, now=now))
             for topic in topics
@@ -137,10 +138,18 @@ class DailyTopSignalsService:
         selected: list[RankedSignal] = []
         source_counts: dict[str, int] = {}
         for item in scored:
+            topic_key = (
+                item.topic.canonical_url
+                or item.topic.source_url
+                or f"{item.topic.source or 'unknown'}::{item.topic.title.strip().lower()}"
+            )
+            if topic_key in seen_topic_keys:
+                continue
             source = item.topic.source or "unknown"
             if source_counts.get(source, 0) >= DailyTopSignalsService.PER_SOURCE_CAP:
                 continue
             selected.append(item)
+            seen_topic_keys.add(topic_key)
             source_counts[source] = source_counts.get(source, 0) + 1
             if len(selected) >= limit:
                 break
