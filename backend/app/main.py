@@ -1,13 +1,17 @@
 import asyncio
 import logging
 import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +43,8 @@ from .schemas import (
     DailyTopSignalsResponse,
     DailyHistoryDayOut,
     DailyHistoryListResponse,
+    FeedStreamMetaOut,
+    FeedStreamResponse,
     HourlyFeedBatchListResponse,
     HourlyFeedBatchOut,
     HourlyFeedItemOut,
@@ -215,6 +221,21 @@ def serialize_feed_item(db: Session, item: HourlyFeedItem) -> HourlyFeedItemOut:
     )
 
 
+def feed_item_identity_key(db: Session, item: HourlyFeedItem) -> str:
+    topic = SignalTopicSyncService.find_topic_for_feed_item(db, item)
+    if topic:
+        return (
+            topic.canonical_url
+            or topic.source_url
+            or f"{topic.source or 'unknown'}::{topic.title.strip().lower()}"
+        )
+    return (
+        item.canonical_url
+        or item.source_url
+        or f"{(item.sources[0] if item.sources else 'unknown')}::{item.title.strip().lower()}"
+    )
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -333,6 +354,57 @@ def list_feed_history(
         batch for batch in batches if HourlyFeedService.batch_has_items(db, batch)
     ][:limit]
     return {"items": [serialize_feed_batch(batch) for batch in valid_batches]}
+
+
+@app.get("/api/feed/stream", response_model=FeedStreamResponse)
+def get_feed_stream(
+    limit: int = Query(default=60, ge=1, le=180),
+    hours: int = Query(default=24, ge=1, le=72),
+    db: Session = Depends(get_db),
+):
+    HourlyFeedService.prune_invalid_batches(db)
+    window_start = datetime.now(timezone.utc) - timedelta(hours=hours)
+    raw_items = (
+        db.query(HourlyFeedItem)
+        .join(HourlyFeedBatch, HourlyFeedBatch.id == HourlyFeedItem.batch_id)
+        .filter(HourlyFeedBatch.window_end >= window_start)
+        .order_by(HourlyFeedItem.published_time.desc(), HourlyFeedItem.created_at.desc())
+        .all()
+    )
+
+    deduped_items: list[HourlyFeedItem] = []
+    seen_keys: set[str] = set()
+    active_hours: set[str] = set()
+    for item in raw_items:
+        item_key = feed_item_identity_key(db, item)
+        if item_key in seen_keys:
+            continue
+        seen_keys.add(item_key)
+        deduped_items.append(item)
+        batch = db.query(HourlyFeedBatch).filter(HourlyFeedBatch.id == item.batch_id).first()
+        if batch:
+            active_hours.add(batch.hour_key)
+        if len(deduped_items) >= limit:
+            break
+
+    serialized_items = [serialize_feed_item(db, item) for item in deduped_items]
+    stream_times = [
+        item.published_time or item.created_at
+        for item in deduped_items
+        if (item.published_time or item.created_at) is not None
+    ]
+    stream_times.sort()
+    updated_at = max((item.created_at for item in deduped_items), default=None)
+    return {
+        "meta": FeedStreamMetaOut(
+            total_items=len(serialized_items),
+            active_hours=len(active_hours),
+            window_start=stream_times[0] if stream_times else None,
+            window_end=stream_times[-1] if stream_times else None,
+            updated_at=updated_at,
+        ),
+        "items": serialized_items,
+    }
 
 
 @app.post("/api/topics/{topic_id}/like")
@@ -801,3 +873,22 @@ def moderation_logs(db: Session = Depends(get_db)):
         .all()
     )
     return logs
+
+
+@app.post(
+    "/api/admin/topics/enrich",
+    dependencies=[Depends(require_admin)],
+)
+def admin_enrich_topics(
+    force: bool = Query(default=True),
+    db: Session = Depends(get_db),
+):
+    sync_stats = SignalTopicSyncService.sync_from_recent_hourly_feed(
+        db,
+        force_reenrich=force,
+    )
+    return {
+        "ok": True,
+        "force_reenrich": force,
+        **sync_stats,
+    }

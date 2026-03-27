@@ -187,7 +187,7 @@ export default function TopicDetailPage() {
                   className="detail-source-link"
                   onClick={handleSourceClick}
                 >
-                  View source ->
+                  View source {"->"}
                 </a>
               )}
             </div>

@@ -2,16 +2,22 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { DailyTopCard } from "../components/TopicSignalCard";
 
+let cachedDailySignals = [];
+
 export default function TopicsPage() {
-  const [dailySignals, setDailySignals] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [dailySignals, setDailySignals] = useState(cachedDailySignals);
+  const [loading, setLoading] = useState(cachedDailySignals.length === 0);
   const [error, setError] = useState("");
 
   const loadSignals = useCallback(async () => {
     try {
-      setLoading(true);
+      if (cachedDailySignals.length === 0) {
+        setLoading(true);
+      }
       const signalsData = await api.getDailyTopSignals();
-      setDailySignals(signalsData.items || []);
+      const items = signalsData.items || [];
+      cachedDailySignals = items;
+      setDailySignals(items);
       setError("");
     } catch (err) {
       setError(err.message || "Failed to load daily top signals");
@@ -23,14 +29,6 @@ export default function TopicsPage() {
   useEffect(() => {
     loadSignals();
   }, [loadSignals]);
-
-  if (loading) {
-    return (
-      <div className="page-wrap">
-        <div className="loading-spinner">Loading daily top signals...</div>
-      </div>
-    );
-  }
 
   return (
     <div className="page-wrap leaderboard-page">
@@ -44,23 +42,23 @@ export default function TopicsPage() {
 
       {error && <div className="error-box">{error}</div>}
 
-      <section className="daily-signals-section">
-        <div className="daily-signals-list">
-          {dailySignals.length === 0 ? (
-            <div className="daily-signals-empty">
-              No engagement signals yet. Refresh the hourly feed, then add likes, comments, or source clicks.
-            </div>
-          ) : (
-            dailySignals.map((topic, index) => (
-              <DailyTopCard
-                key={`signal-${topic.id}`}
-                item={topic}
-                index={index}
-              />
-            ))
-          )}
-        </div>
-      </section>
+      <div className="daily-signals-list daily-signals-list-hub">
+        {loading && dailySignals.length === 0 ? (
+          <div className="daily-signals-empty">Loading daily top signals...</div>
+        ) : dailySignals.length === 0 ? (
+          <div className="daily-signals-empty">
+            No engagement signals yet. Refresh the hourly feed, then add likes, comments, or source clicks.
+          </div>
+        ) : (
+          dailySignals.map((topic, index) => (
+            <DailyTopCard
+              key={`signal-${topic.id}`}
+              item={topic}
+              index={index}
+            />
+          ))
+        )}
+      </div>
     </div>
   );
 }

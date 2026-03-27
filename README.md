@@ -2,7 +2,7 @@
 
 AI Builder Daily Hub is a full-stack AI signal product with three core surfaces:
 
-- `Live Feed`: an hourly stream of fresh AI-builder topics collected from external sources
+- `Live Feed`: a continuous stream of fresh AI-builder topics collected from external sources
 - `Daily Top 10`: the strongest community-engaged topics from the last 24 hours inside the platform
 - `Daily History`: archived daily signal sets, browsable by date
 
@@ -24,6 +24,9 @@ The system separates source collection from community ranking:
 
 - Pulls from sources such as Hacker News, GitHub Trending, Product Hunt, Reddit, and selected RSS feeds
 - Scores and clusters source items into hourly batches
+- Uses a hybrid clustering pass that combines title similarity, semantic similarity, and token overlap to better merge rewrites of the same topic
+- Presents recent hourly batches as one continuous reading flow instead of manual hour-by-hour browsing
+- Supports `Refresh Feed`, passive new-item detection, and incremental `Load more`
 - Works as the lightweight discovery surface
 - Clicking a title opens the discussion thread for that topic
 
@@ -49,6 +52,7 @@ The system separates source collection from community ranking:
 ### Topic Detail
 
 - Full discussion page for a topic
+- Preserves navigation context so users can return to the originating surface such as `Daily Top 10`, `Daily History`, or `Live Feed`
 - Shows:
   - summary
   - key insights
@@ -64,6 +68,16 @@ The system separates source collection from community ranking:
 - Comment reports
 - Automatic moderation
 - Admin review queue and processed review list
+
+### AI Enrichment
+
+- Topics can include AI-generated:
+  - summary
+  - key insights
+  - why it matters
+  - technical summary
+- Falls back to deterministic template copy when AI enrichment is unavailable
+- Admins can trigger a manual rebuild for recent topics
 
 ## Active Backend Routes
 
@@ -91,6 +105,7 @@ The system separates source collection from community ranking:
 ### Feed
 
 - `GET /api/feed/realtime`
+- `GET /api/feed/stream`
 - `POST /api/feed/realtime/refresh`
 - `GET /api/feed/history`
 
@@ -104,6 +119,7 @@ Requires `X-ADMIN-TOKEN`.
 - `GET /api/admin/reports`
 - `PATCH /api/admin/comments/{id}`
 - `POST /api/admin/comments/{id}/reopen`
+- `POST /api/admin/topics/enrich`
 
 ## Current Backend Flow
 
@@ -114,12 +130,14 @@ Requires `X-ADMIN-TOKEN`.
 3. Cluster related source items
 4. Select a diverse hourly batch
 5. Save `HourlyFeedBatch` and `HourlyFeedItem`
+6. Compose recent non-empty batches into a deduped continuous stream for the frontend
 
 ### Topic Sync
 
 1. Read recent `HourlyFeedItem`
 2. Match or create `Topic`
 3. Attach enrichment fields:
+   - AI-generated summary
    - summary
    - key insights
    - why it matters
@@ -157,8 +175,15 @@ Notes:
 
 - The app refreshes the hourly feed on startup
 - Recent hourly items are synced into topics automatically
+- `Refresh Feed` rebuilds the current hourly batch, then reloads the continuous stream view
 - Default admin token: `dev-admin-token`
 - Active database: `backend/hot_topic_hub.db`
+- Optional AI topic enrichment via OpenRouter:
+  - Create `backend/.env` from `backend/.env.example`
+  - Set `OPENROUTER_API_KEY=...`
+  - Set `OPENROUTER_MODEL=deepseek/deepseek-chat`
+  - Set `AI_ENRICHMENT_ENABLED=true`
+  - Without a key, the backend falls back to deterministic template-based copy
 
 ### Frontend
 
@@ -170,7 +195,7 @@ npm run dev
 
 ## Current Direction
 
-- `Live Feed` is the lightweight discovery and discussion entry point
+- `Live Feed` is the lightweight discovery and discussion entry point, presented as a continuous stream
 - `Daily Top 10` is the curated community signal page
 - `Daily History` is the archive surface
 - `Topic Detail` is the full reading and discussion surface

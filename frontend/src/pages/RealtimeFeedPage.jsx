@@ -1,22 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { FeedTopicRow } from "../components/TopicSignalCard";
+
+let cachedFeedStream = null;
+let cachedPendingFeed = null;
+let cachedPendingCount = 0;
+let cachedVisibleCount = 14;
+
+const INITIAL_VISIBLE_COUNT = 14;
+const LOAD_MORE_STEP = 10;
 
 function isValidDateValue(value) {
   if (!value) return false;
   return !Number.isNaN(new Date(value).getTime());
-}
-
-function formatHour(value) {
-  if (!isValidDateValue(value)) return "Unavailable";
-  const date = new Date(value);
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
 }
 
 function formatRelative(value) {
@@ -29,164 +25,207 @@ function formatRelative(value) {
   return `${Math.round(diffHours / 24)}d ago`;
 }
 
-export default function RealtimeFeedPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [feed, setFeed] = useState(null);
-  const [history, setHistory] = useState([]);
-  const selectedHour = searchParams.get("hour") || "";
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
+function formatWindow(value) {
+  if (!isValidDateValue(value)) return "Unavailable";
+  const date = new Date(value);
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
-  const loadFeed = useCallback(async (hourKey = undefined) => {
-    try {
-      setLoading(true);
-      const [feedData, historyData] = await Promise.all([
-        api.getRealtimeFeed(hourKey),
-        api.getFeedHistory(48),
-      ]);
-      setFeed(feedData);
-      setHistory(historyData.items || []);
-      setError("");
-    } catch (err) {
-      setError(err.message || "Failed to load realtime feed");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+export default function RealtimeFeedPage() {
+  const [feed, setFeed] = useState(cachedFeedStream);
+  const [loading, setLoading] = useState(!cachedFeedStream);
+  const [refreshing, setRefreshing] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+  const [pendingFeed, setPendingFeed] = useState(cachedPendingFeed);
+  const [pendingCount, setPendingCount] = useState(cachedPendingCount);
+  const [visibleCount, setVisibleCount] = useState(cachedVisibleCount);
+  const feedRef = useRef(null);
 
   useEffect(() => {
-    loadFeed(selectedHour || undefined);
-  }, [loadFeed, selectedHour]);
+    feedRef.current = feed;
+  }, [feed]);
+
+  const replaceFeed = useCallback((nextFeed) => {
+    cachedFeedStream = nextFeed;
+    cachedPendingFeed = null;
+    cachedPendingCount = 0;
+    cachedVisibleCount = INITIAL_VISIBLE_COUNT;
+    setFeed(nextFeed);
+    setPendingFeed(null);
+    setPendingCount(0);
+    setVisibleCount(INITIAL_VISIBLE_COUNT);
+  }, []);
+
+  const loadFeed = useCallback(
+    async ({ silent = false, adopt = true } = {}) => {
+      try {
+        if (!silent && !cachedFeedStream) {
+          setLoading(true);
+        } else {
+          setChecking(true);
+        }
+        const streamData = await api.getRealtimeFeedStream(60, 24);
+        const currentFeed = feedRef.current;
+        if (!adopt && currentFeed) {
+          const currentIds = new Set((currentFeed.items || []).map((item) => item.id));
+          const unseen = (streamData.items || []).filter((item) => !currentIds.has(item.id));
+          if (unseen.length > 0) {
+            cachedPendingFeed = streamData;
+            cachedPendingCount = unseen.length;
+            setPendingFeed(streamData);
+            setPendingCount(unseen.length);
+          } else {
+            cachedPendingFeed = null;
+            cachedPendingCount = 0;
+            setPendingFeed(null);
+            setPendingCount(0);
+          }
+        } else {
+          replaceFeed(streamData);
+        }
+        setError("");
+      } catch (err) {
+        setError(err.message || "Failed to load live feed");
+      } finally {
+        setLoading(false);
+        setChecking(false);
+      }
+    },
+    [replaceFeed],
+  );
+
+  useEffect(() => {
+    loadFeed();
+  }, [loadFeed]);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      loadFeed(selectedHour || undefined);
-    }, 60000);
+      loadFeed({ silent: true, adopt: false });
+    }, 45000);
     return () => clearInterval(interval);
-  }, [loadFeed, selectedHour]);
+  }, [loadFeed]);
 
   async function handleRefresh() {
     try {
       setRefreshing(true);
-      const batch = await api.refreshRealtimeFeed(selectedHour || undefined, true);
-      setFeed(batch);
-      const historyData = await api.getFeedHistory(48);
-      setHistory(historyData.items || []);
+      await api.refreshRealtimeFeed(undefined, true);
+      const streamData = await api.getRealtimeFeedStream(60, 24);
+      replaceFeed(streamData);
       setError("");
     } catch (err) {
-      setError(err.message || "Failed to refresh realtime feed");
+      setError(err.message || "Failed to refresh live feed");
     } finally {
       setRefreshing(false);
     }
   }
 
-  const windowLabel = useMemo(() => {
-    if (!feed?.batch) return "";
-    return `${formatHour(feed.batch.window_start)} - ${formatHour(feed.batch.window_end)}`;
-  }, [feed]);
-
-  if (loading) {
-    return (
-      <div className="page-wrap feed-page">
-        <div className="loading-spinner">Loading realtime feed...</div>
-      </div>
-    );
-  }
+  const meta = feed?.meta;
+  const visibleItems = (feed?.items || []).slice(0, visibleCount);
+  const hasMoreItems = (feed?.items || []).length > visibleCount;
+  const streamLabel = useMemo(() => {
+    if (!meta?.window_start || !meta?.window_end) return "";
+    return `${formatWindow(meta.window_start)} - ${formatWindow(meta.window_end)}`;
+  }, [meta]);
 
   return (
-    <div className="page-wrap feed-page">
-      <div className="feed-hero">
-        <div className="feed-hero-copy">
-          <p className="eyebrow">Hourly Feed</p>
+    <div className="page-wrap feed-page feed-page-stream">
+      <div className="feed-hero feed-hero-stream">
+        <div className="feed-hero-copy header-content">
+          <p className="eyebrow">Live Feed</p>
           <h1 className="feed-title">Live AI Builder Discussions</h1>
-          <p className="feed-subtitle">
-            A lightweight stream of fresh titles. Open a topic to read the source, comment, and join the discussion.
+          <p className="subtitle">
+            A live stream of fresh AI-builder signals.
           </p>
         </div>
         <div className="feed-hero-actions">
-          <select
-            className="feed-hour-select"
-            value={selectedHour}
-            onChange={(e) => {
-              const nextHour = e.target.value;
-              const nextParams = new URLSearchParams(searchParams);
-              if (nextHour) {
-                nextParams.set("hour", nextHour);
-              } else {
-                nextParams.delete("hour");
-              }
-              setSearchParams(nextParams);
-            }}
+          <button
+            className="feed-refresh-btn"
+            onClick={handleRefresh}
+            disabled={refreshing}
           >
-            <option value="">Current hour</option>
-            {history.map((batch) => (
-              <option key={batch.hour_key} value={batch.hour_key}>
-                {formatHour(batch.hour_key)}
-              </option>
-            ))}
-          </select>
-          <button onClick={handleRefresh} disabled={refreshing}>
-            {refreshing ? "Refreshing..." : "Refresh Hour"}
+            {refreshing ? "Refreshing..." : "Refresh Feed"}
           </button>
         </div>
       </div>
 
-      {error && <div className="error-box">{error}</div>}
-
-      {feed?.batch && (
-        <div className="feed-batch-bar">
-          <span>
-            <strong>Window</strong> {windowLabel}
-          </span>
-          <span>
-            <strong>Updated</strong> {formatRelative(feed.batch.created_at)}
-          </span>
-          <span>
-            <strong>Items</strong> {feed.batch.items_count}
-          </span>
+      {pendingCount > 0 && pendingFeed && (
+        <div className="feed-new-items-banner" role="status" aria-live="polite">
+          <div className="feed-new-items-copy">
+            <strong>{pendingCount} new items</strong>
+            <span>Fresh signals are ready to drop into the stream.</span>
+          </div>
+          <button
+            className="feed-new-items-btn"
+            onClick={() => replaceFeed(pendingFeed)}
+          >
+            Show latest
+          </button>
         </div>
       )}
 
-      <div className="feed-layout">
-        <section className="feed-stream">
-          {(feed?.items || []).length === 0 ? (
-            <div className="feed-empty-state">
-              <h2>No items for this hour yet</h2>
-              <p>
-                The selected hour did not surface enough qualifying AI builder topics yet.
-              </p>
-            </div>
-          ) : (
-            (feed?.items || []).map((item, index) => (
-              <FeedTopicRow key={item.id} item={item} index={index} />
-            ))
-          )}
-        </section>
+      {error && <div className="error-box">{error}</div>}
 
-        <aside className="feed-history-panel">
-          <h2>Recent Batches</h2>
-          <div className="feed-history-list">
-            {history.map((batch) => {
-              const isActive =
-                (selectedHour || feed?.batch?.hour_key) === batch.hour_key;
-              return (
-                <button
-                  key={batch.hour_key}
-                  className={`feed-history-item ${isActive ? "active" : ""}`}
-                  onClick={() => setSelectedHour(batch.hour_key)}
-                >
-                  <span className="feed-history-copy">
-                    <strong>{formatHour(batch.hour_key)}</strong>
-                    <small>{formatRelative(batch.created_at)}</small>
-                  </span>
-                  <small className="feed-history-count">{batch.items_count} items</small>
-                </button>
-              );
-            })}
+      {meta && (
+        <div className="feed-stream-bar">
+          <span>
+            <strong>Coverage</strong> {streamLabel || "Last 24 hours"}
+          </span>
+          <span>
+            <strong>Updated</strong> {formatRelative(meta.updated_at)}
+          </span>
+          <span>
+            <strong>Live items</strong> {meta.total_items}
+          </span>
+          <span>
+            <strong>Active windows</strong> {meta.active_hours}
+          </span>
+          {checking && <span className="feed-stream-pulse">Checking for new items...</span>}
+        </div>
+      )}
+
+      <section className="feed-stream feed-stream-continuous">
+        {loading && !feed ? (
+          <div className="feed-empty-state">
+            <h2>Loading live feed...</h2>
+            <p>Pulling the latest stream of AI-builder topics.</p>
           </div>
-        </aside>
-      </div>
+        ) : (feed?.items || []).length === 0 ? (
+          <div className="feed-empty-state">
+            <h2>No live items yet</h2>
+            <p>
+              The feed has not surfaced enough qualifying AI builder topics in the latest stream window.
+            </p>
+          </div>
+        ) : (
+          visibleItems.map((item, index) => (
+            <FeedTopicRow key={item.id} item={item} index={index} />
+          ))
+        )}
+      </section>
+
+      {hasMoreItems && (
+        <div className="feed-load-more-shell">
+          <button
+            className="feed-load-more-btn"
+            onClick={() => {
+              const nextCount = visibleCount + LOAD_MORE_STEP;
+              cachedVisibleCount = nextCount;
+              setVisibleCount(nextCount);
+            }}
+          >
+            Load more
+          </button>
+          <p className="feed-load-more-meta">
+            Showing {visibleItems.length} of {(feed?.items || []).length} live items.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

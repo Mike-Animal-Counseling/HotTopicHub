@@ -3,6 +3,9 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { DailyTopCard } from "../components/TopicSignalCard";
 
+let cachedHistoryItems = [];
+const cachedTopicsByDate = new Map();
+
 function formatDateLabel(value) {
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
@@ -24,17 +27,22 @@ function formatRelative(value) {
 
 export default function TopicsHistoryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [history, setHistory] = useState([]);
-  const [topics, setTopics] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const selectedDate = searchParams.get("date") || "";
+  const [history, setHistory] = useState(cachedHistoryItems);
+  const [topics, setTopics] = useState(
+    selectedDate ? (cachedTopicsByDate.get(selectedDate) || []) : [],
+  );
+  const [loading, setLoading] = useState(cachedHistoryItems.length === 0);
+  const [error, setError] = useState("");
 
   const loadHistory = useCallback(async () => {
     try {
-      setLoading(true);
+      if (cachedHistoryItems.length === 0) {
+        setLoading(true);
+      }
       const data = await api.getDailySignalHistory(45);
       const items = data.items || [];
+      cachedHistoryItems = items;
       setHistory(items);
       const initialDate = items[0]?.date_key || "";
       if (!selectedDate && initialDate) {
@@ -55,9 +63,15 @@ export default function TopicsHistoryPage() {
       setTopics([]);
       return;
     }
+    const cachedTopics = cachedTopicsByDate.get(dateKey);
+    if (cachedTopics) {
+      setTopics(cachedTopics);
+    }
     try {
       const data = await api.getDailySignalsForDate(dateKey);
-      setTopics(data.items || []);
+      const items = data.items || [];
+      cachedTopicsByDate.set(dateKey, items);
+      setTopics(items);
       setError("");
     } catch (err) {
       setError(err.message || "Failed to load archived daily topics");
@@ -71,6 +85,9 @@ export default function TopicsHistoryPage() {
   useEffect(() => {
     if (selectedDate) {
       loadDateTopics(selectedDate);
+    } else if (cachedHistoryItems[0]?.date_key) {
+      const fallbackTopics = cachedTopicsByDate.get(cachedHistoryItems[0].date_key) || [];
+      setTopics(fallbackTopics);
     }
   }, [loadDateTopics, selectedDate]);
 
@@ -78,14 +95,6 @@ export default function TopicsHistoryPage() {
     () => (selectedDate ? formatDateLabel(selectedDate) : "No day selected"),
     [selectedDate],
   );
-
-  if (loading) {
-    return (
-      <div className="page-wrap leaderboard-page">
-        <div className="loading-spinner">Loading daily history...</div>
-      </div>
-    );
-  }
 
   return (
     <div className="page-wrap leaderboard-page history-shell">
@@ -129,7 +138,9 @@ export default function TopicsHistoryPage() {
 
       <section className="history-results">
         <div className="daily-signals-list">
-          {topics.length === 0 ? (
+          {loading && history.length === 0 ? (
+            <div className="daily-signals-empty">Loading daily history...</div>
+          ) : topics.length === 0 ? (
             <div className="daily-signals-empty">
               No archived topics for this date yet.
             </div>

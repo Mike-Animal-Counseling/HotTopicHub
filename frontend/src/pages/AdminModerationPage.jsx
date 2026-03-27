@@ -1,23 +1,42 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, setAdminToken, hasAdminToken } from "../api";
 
+let cachedAdminState = {
+  queue: [],
+  reports: [],
+  logs: [],
+  approved: [],
+  rejected: [],
+  enrichMessage: "",
+};
+
 export default function AdminModerationPage() {
   const [isAdmin, setIsAdmin] = useState(hasAdminToken());
   const [tokenInput, setTokenInput] = useState("");
-  const [queue, setQueue] = useState([]);
-  const [reports, setReports] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [approved, setApproved] = useState([]);
-  const [rejected, setRejected] = useState([]);
+  const [queue, setQueue] = useState(cachedAdminState.queue);
+  const [reports, setReports] = useState(cachedAdminState.reports);
+  const [logs, setLogs] = useState(cachedAdminState.logs);
+  const [approved, setApproved] = useState(cachedAdminState.approved);
+  const [rejected, setRejected] = useState(cachedAdminState.rejected);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichMessage, setEnrichMessage] = useState(cachedAdminState.enrichMessage);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectCommentId, setRejectCommentId] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
 
   const loadAdminData = useCallback(async () => {
     if (!hasAdminToken()) return;
-    setLoading(true);
+    if (
+      cachedAdminState.queue.length === 0
+      && cachedAdminState.reports.length === 0
+      && cachedAdminState.logs.length === 0
+      && cachedAdminState.approved.length === 0
+      && cachedAdminState.rejected.length === 0
+    ) {
+      setLoading(true);
+    }
     try {
       const [queueData, reportsData, logsData, processedData] =
         await Promise.all([
@@ -35,6 +54,14 @@ export default function AdminModerationPage() {
       const rejectedData = (processedData || []).filter(
         (c) => c.moderation_status === "rejected",
       );
+      cachedAdminState = {
+        ...cachedAdminState,
+        queue: queueData || [],
+        reports: reportsData || [],
+        logs: logsData || [],
+        approved: approvedData,
+        rejected: rejectedData,
+      };
       setApproved(approvedData);
       setRejected(rejectedData);
       setError("");
@@ -79,6 +106,14 @@ export default function AdminModerationPage() {
   function handleLogout() {
     setAdminToken("");
     setIsAdmin(false);
+    cachedAdminState = {
+      queue: [],
+      reports: [],
+      logs: [],
+      approved: [],
+      rejected: [],
+      enrichMessage: "",
+    };
     setQueue([]);
     setReports([]);
     setLogs([]);
@@ -134,15 +169,43 @@ export default function AdminModerationPage() {
     }
   }
 
+  async function handleEnrichTopics() {
+    try {
+      setEnriching(true);
+      setEnrichMessage("");
+      setError("");
+      const result = await api.enrichTopics(true);
+      const message = `AI enrichment finished. Processed ${result.processed_count ?? 0} topics; enriched ${result.enriched_count ?? 0}, updated ${result.updated_count ?? 0}, created ${result.created_count ?? 0}.`;
+      cachedAdminState = {
+        ...cachedAdminState,
+        enrichMessage: message,
+      };
+      setEnrichMessage(message);
+      await loadAdminData();
+    } catch (err) {
+      setError(err.message || "Failed to rebuild AI summaries");
+    } finally {
+      setEnriching(false);
+    }
+  }
+
   // Show token input form when not logged in
   if (!isAdmin) {
     return (
-      <div className="page-wrap">
-        <h1>Admin Moderation</h1>
-        <div className="token-login-form">
+      <div className="page-wrap admin-page admin-login-page">
+        <div className="admin-header admin-login-header">
+          <div className="admin-header-content">
+            <p className="eyebrow">Admin Panel</p>
+            <h1>Admin Moderation</h1>
+            <p className="subtitle admin-login-subtitle">
+              Enter the admin token to review reports, moderation queues, and AI enrichment tools.
+            </p>
+          </div>
+        </div>
+        <div className="token-login-form admin-login-card">
           <form onSubmit={handleTokenSubmit}>
             <div className="form-group">
-              <label>Admin Token:</label>
+              <label>Admin Token</label>
               <input
                 type="password"
                 value={tokenInput}
@@ -151,14 +214,11 @@ export default function AdminModerationPage() {
                 disabled={loading}
               />
             </div>
-            <button type="submit" disabled={loading}>
+            <button className="admin-login-btn" type="submit" disabled={loading}>
               {loading ? "Verifying..." : "Login as Admin"}
             </button>
           </form>
           {error && <div className="error-box">{error}</div>}
-          <p style={{ marginTop: "1rem", fontSize: "0.9rem", color: "#666" }}>
-            Default token for testing: <code>dev-admin-token</code>
-          </p>
         </div>
       </div>
     );
@@ -168,7 +228,13 @@ export default function AdminModerationPage() {
   function scrollToSection(sectionId) {
     const element = document.getElementById(sectionId);
     if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "start" });
+      const rect = element.getBoundingClientRect();
+      const absoluteTop = window.scrollY + rect.top;
+      const centeredTop = Math.max(
+        0,
+        absoluteTop - ((window.innerHeight - rect.height) / 2),
+      );
+      window.scrollTo({ top: centeredTop, behavior: "smooth" });
     }
   }
 
@@ -178,12 +244,25 @@ export default function AdminModerationPage() {
         <div className="admin-header-content">
           <p className="eyebrow">Admin Panel</p>
           <h1>Moderation Dashboard</h1>
+          <p className="subtitle admin-header-subtitle">
+            Review reports, moderation queues, and topic enrichment tools.
+          </p>
         </div>
-        <button className="admin-logout-btn" onClick={handleLogout}>
-          Logout
-        </button>
+        <div className="admin-header-actions">
+          <button
+            className="admin-utility-btn"
+            onClick={handleEnrichTopics}
+            disabled={enriching || loading}
+          >
+            {enriching ? "Rebuilding AI..." : "Rebuild AI Summaries"}
+          </button>
+          <button className="admin-logout-btn" onClick={handleLogout}>
+            Logout
+          </button>
+        </div>
       </div>
       {error && <div className="error-box">{error}</div>}
+      {enrichMessage && <div className="notice-box">{enrichMessage}</div>}
       {loading && <div className="admin-loading">Loading...</div>}
 
       {/* Sidebar Navigation */}

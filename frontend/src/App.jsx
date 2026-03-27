@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, Route, Routes } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import "./App.css";
 import { hasAdminToken } from "./api";
 import AdminModerationPage from "./pages/AdminModerationPage";
@@ -10,6 +10,7 @@ import TopicsPage from "./pages/TopicsPage";
 
 function App() {
   const [isAdmin, setIsAdmin] = useState(hasAdminToken());
+  const location = useLocation();
 
   useEffect(() => {
     function handleStorageChange() {
@@ -27,14 +28,39 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [location.pathname, location.search]);
+
   return (
     <div>
       <header className="top-nav">
         <div className="nav-left">
-          <Link to="/topics">Daily Hub</Link>
-          <Link to="/topics/history">History</Link>
-          <Link to="/feed">Live Feed</Link>
-          <Link to="/admin/moderation">Admin</Link>
+          <NavLink
+            to="/topics"
+            end
+            className={({ isActive }) => `nav-pill ${isActive ? "active" : ""}`}
+          >
+            Daily Hub
+          </NavLink>
+          <NavLink
+            to="/topics/history"
+            className={({ isActive }) => `nav-pill ${isActive ? "active" : ""}`}
+          >
+            History
+          </NavLink>
+          <NavLink
+            to="/feed"
+            className={({ isActive }) => `nav-pill ${isActive ? "active" : ""}`}
+          >
+            Live Feed
+          </NavLink>
+          <NavLink
+            to="/admin/moderation"
+            className={({ isActive }) => `nav-pill ${isActive ? "active" : ""}`}
+          >
+            Admin
+          </NavLink>
         </div>
         <div className="nav-right">
           {isAdmin ? (

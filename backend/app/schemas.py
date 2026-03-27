@@ -232,6 +232,19 @@ class HourlyFeedBatchListResponse(BaseModel):
     items: list[HourlyFeedBatchOut]
 
 
+class FeedStreamMetaOut(BaseModel):
+    total_items: int
+    active_hours: int
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class FeedStreamResponse(BaseModel):
+    meta: FeedStreamMetaOut
+    items: list[HourlyFeedItemOut]
+
+
 class CommentListResponse(BaseModel):
     items: list[CommentOut]
 

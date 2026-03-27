@@ -30,6 +30,10 @@ export const api = {
     request(
       `/api/feed/realtime${hourKey ? `?hour=${encodeURIComponent(hourKey)}` : ""}`,
     ),
+  getRealtimeFeedStream: (limit = 60, hours = 24) =>
+    request(
+      `/api/feed/stream?limit=${encodeURIComponent(limit)}&hours=${encodeURIComponent(hours)}`,
+    ),
   refreshRealtimeFeed: (hourKey, force = true) => {
     const params = [
       hourKey ? `hour=${encodeURIComponent(hourKey)}` : "",
@@ -122,6 +126,13 @@ export const api = {
   getProcessedComments: () => {
     const token = getAdminToken();
     return request("/api/admin/moderation/processed", {
+      headers: { "X-ADMIN-TOKEN": token },
+    });
+  },
+  enrichTopics: (force = true) => {
+    const token = getAdminToken();
+    return request(`/api/admin/topics/enrich?force=${force ? "true" : "false"}`, {
+      method: "POST",
       headers: { "X-ADMIN-TOKEN": token },
     });
   },
