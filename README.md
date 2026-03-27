@@ -200,6 +200,5 @@ npm run dev
 - `Daily History` is the archive surface
 - `Topic Detail` is the full reading and discussion surface
 
-The old daily batch pipeline, old trending endpoints, and manual daily seed flow are no longer part of the active product path.
 
 ![Demo](demo-release0.gif)
