@@ -202,4 +202,4 @@ npm run dev
 
 The old daily batch pipeline, old trending endpoints, and manual daily seed flow are no longer part of the active product path.
 
-![Demo](demo.gif)
+![Demo](demo-release0.gif)
