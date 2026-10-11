@@ -7,6 +7,20 @@ frontend/node_modules/
 backend/*.db
 
 .env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+.session-secret
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+coverage/
 
 .DS_Store
 Thumbs.db

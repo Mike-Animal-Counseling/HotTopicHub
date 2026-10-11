@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.request import Request
+from ..http_client import open_https as urlopen
 
-from .base_source import BaseSourceAdapter, RawArticle
+from .base_source import BaseSourceAdapter, RawArticle, read_response
 
 
 class GitHubTrendingSourceAdapter(BaseSourceAdapter):
@@ -40,7 +41,7 @@ class GitHubTrendingSourceAdapter(BaseSourceAdapter):
                 },
             )
             with urlopen(request, timeout=8) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+                payload = json.loads(read_response(response).decode("utf-8"))
 
             items = payload.get("items", [])
             articles: list[RawArticle] = []

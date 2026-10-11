@@ -1,12 +1,12 @@
 import asyncio
 import logging
-import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from dotenv import load_dotenv
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -64,7 +64,9 @@ from .services.hourly_feed_service import HourlyFeedService
 from .services.ranking_service import RankingService
 from .services.signal_topic_sync_service import SignalTopicSyncService
 
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev-admin-token")
+from .security import SecuritySettings, RequestSecurityMiddleware, require_admin, require_visitor
+
+security_settings = SecuritySettings.from_env()
 
 
 async def run_hourly_feed_refresh_loop():
@@ -103,13 +105,13 @@ async def lifespan(app: FastAPI):
         HourlyFeedService.get_or_create_current_feed(db)
         logger.info("Syncing signal topics from recent hourly feed...")
         SignalTopicSyncService.sync_from_recent_hourly_feed(db)
-        logger.info("Preloading Detoxify model for comment moderation...")
-        ModerationService._get_detoxify_model()
-        logger.info("Detoxify model loaded successfully")
+        moderation_model = ModerationService._get_detoxify_model()
+        logger.info("Automatic moderation model available: %s", moderation_model is not None)
         background_task = asyncio.create_task(run_hourly_feed_refresh_loop())
         logger.info("=== Application startup complete ===")
     except Exception as e:
         logger.error(f"Startup error: {e}", exc_info=True)
+        raise
     finally:
         if db_gen is not None:
             db_gen.close()
@@ -124,20 +126,18 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="Comments API", lifespan=lifespan)
+app = FastAPI(title="HotTopicHub API", lifespan=lifespan)
+app.state.security = security_settings
+app.add_middleware(RequestSecurityMiddleware, settings=security_settings)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(security_settings.allowed_hosts))
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=list(security_settings.allowed_origins),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type", "X-ADMIN-TOKEN"],
 )
-
-
-def require_admin(x_admin_token: str | None = Header(default=None)):
-    if x_admin_token != ADMIN_TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid admin token.")
 
 
 def get_topic_or_404(db: Session, topic_id: int) -> Topic:
@@ -243,7 +243,6 @@ def health():
 
 @app.get("/api/topics/daily-top-signals", response_model=DailyTopSignalsResponse)
 def get_daily_top_signals(db: Session = Depends(get_db)):
-    SignalTopicSyncService.sync_from_recent_hourly_feed(db)
     ranked = DailyTopSignalsService.get_daily_top_signals(db)
     items = [serialize_daily_top_signal(item) for item in ranked]
     return {"items": items}
@@ -293,15 +292,11 @@ def get_realtime_feed(
         )
         if not batch:
             raise HTTPException(status_code=404, detail="Hourly feed batch not found")
-        if not HourlyFeedService.batch_has_items(db, batch):
-            batch = HourlyFeedService.generate_hourly_feed(
-                db,
-                hour_key=hour_key,
-                force=True,
-            )
     else:
-        batch = HourlyFeedService.get_or_create_current_feed(db)
-    SignalTopicSyncService.sync_from_recent_hourly_feed(db)
+        current_hour, _, _ = HourlyFeedService._resolve_window(None)
+        batch = db.query(HourlyFeedBatch).filter(HourlyFeedBatch.hour_key == current_hour).first()
+        if not batch:
+            raise HTTPException(status_code=404, detail="Hourly feed is not ready yet.")
 
     items = (
         db.query(HourlyFeedItem)
@@ -315,7 +310,7 @@ def get_realtime_feed(
     }
 
 
-@app.post("/api/feed/realtime/refresh", response_model=HourlyFeedResponse)
+@app.post("/api/feed/realtime/refresh", response_model=HourlyFeedResponse, dependencies=[Depends(require_admin)])
 def refresh_realtime_feed(
     hour_key: str | None = Query(default=None, alias="hour"),
     force: bool = Query(default=False),
@@ -344,7 +339,6 @@ def list_feed_history(
     limit: int = Query(default=24, ge=1, le=168),
     db: Session = Depends(get_db),
 ):
-    HourlyFeedService.prune_invalid_batches(db)
     batches = (
         db.query(HourlyFeedBatch)
         .order_by(HourlyFeedBatch.window_end.desc())
@@ -362,7 +356,6 @@ def get_feed_stream(
     hours: int = Query(default=24, ge=1, le=72),
     db: Session = Depends(get_db),
 ):
-    HourlyFeedService.prune_invalid_batches(db)
     window_start = datetime.now(timezone.utc) - timedelta(hours=hours)
     raw_items = (
         db.query(HourlyFeedItem)
@@ -408,9 +401,9 @@ def get_feed_stream(
 
 
 @app.post("/api/topics/{topic_id}/like")
-def like_topic(topic_id: int, payload: TopicLikeRequest, db: Session = Depends(get_db)):
+def like_topic(topic_id: int, payload: TopicLikeRequest, db: Session = Depends(get_db), visitor_id: str = Depends(require_visitor)):
     get_topic_or_404(db, topic_id)
-    like = TopicLike(topic_id=topic_id, user_identifier=payload.user_identifier)
+    like = TopicLike(topic_id=topic_id, user_identifier=visitor_id)
     db.add(like)
     try:
         db.commit()
@@ -427,7 +420,7 @@ def like_topic(topic_id: int, payload: TopicLikeRequest, db: Session = Depends(g
 
 
 @app.post("/api/topics/{topic_id}/source-click")
-def record_topic_source_click(topic_id: int, db: Session = Depends(get_db)):
+def record_topic_source_click(topic_id: int, db: Session = Depends(get_db), visitor_id: str = Depends(require_visitor)):
     topic = DailyTopSignalsService.record_source_click(db, topic_id)
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
@@ -441,14 +434,15 @@ def record_topic_source_click(topic_id: int, db: Session = Depends(get_db)):
 @app.delete("/api/topics/{topic_id}/like")
 def unlike_topic(
     topic_id: int,
-    user_identifier: str = Query(..., min_length=2),
+    user_identifier: str = Query(..., min_length=2, max_length=100),
     db: Session = Depends(get_db),
+    visitor_id: str = Depends(require_visitor),
 ):
     get_topic_or_404(db, topic_id)
     like = (
         db.query(TopicLike)
         .filter(
-            TopicLike.topic_id == topic_id, TopicLike.user_identifier == user_identifier
+            TopicLike.topic_id == topic_id, TopicLike.user_identifier == visitor_id
         )
         .first()
     )
@@ -465,7 +459,7 @@ def unlike_topic(
 
 
 @app.get("/api/topics/{topic_id}/comments", response_model=CommentListResponse)
-def list_topic_comments(topic_id: int, db: Session = Depends(get_db)):
+def list_topic_comments(topic_id: int, limit: int = Query(default=100, ge=1, le=200), db: Session = Depends(get_db)):
     get_topic_or_404(db, topic_id)
     items = (
         db.query(Comment)
@@ -475,6 +469,7 @@ def list_topic_comments(topic_id: int, db: Session = Depends(get_db)):
             Comment.is_hidden.is_(False),
         )
         .order_by(Comment.created_at.desc())
+        .limit(limit)
         .all()
     )
     return {"items": items}
@@ -491,8 +486,10 @@ def list_ranked_topic_comments(topic_id: int, db: Session = Depends(get_db)):
         .filter(
             Comment.topic_id == topic_id,
             Comment.is_hidden.is_(False),
-            Comment.moderation_status.in_(["approved", "pending_review"]),
+            Comment.moderation_status == "approved",
         )
+        .order_by(Comment.created_at.desc())
+        .limit(200)
         .all()
     )
     ranked = CommentRankingService.rank_comments(comments)
@@ -512,14 +509,14 @@ def list_ranked_topic_comments(topic_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/topics/{topic_id}/comments", response_model=CommentCreateResponse)
 def create_comment(
-    topic_id: int, payload: CommentCreate, db: Session = Depends(get_db)
+    topic_id: int, payload: CommentCreate, db: Session = Depends(get_db), visitor_id: str = Depends(require_visitor)
 ):
     get_topic_or_404(db, topic_id)
 
     moderation_result = ModerationService.run_auto_moderation(
         db,
         topic_id=topic_id,
-        user_identifier=payload.user_identifier,
+        user_identifier=visitor_id,
         text=payload.text,
         image_url=payload.image_url,
     )
@@ -555,7 +552,7 @@ def create_comment(
     is_hidden = moderation_result["status"] == "pending_review"
     comment = Comment(
         topic_id=topic_id,
-        user_identifier=payload.user_identifier,
+        user_identifier=visitor_id,
         author_name=payload.author_name,
         text=payload.text,
         image_url=payload.image_url,
@@ -597,7 +594,7 @@ def create_comment(
     }
 
 
-@app.patch("/api/comments/{comment_id}", response_model=CommentOut)
+@app.patch("/api/comments/{comment_id}", response_model=CommentOut, dependencies=[Depends(require_admin)])
 def update_comment(
     comment_id: int, payload: CommentUpdate, db: Session = Depends(get_db)
 ):
@@ -608,12 +605,18 @@ def update_comment(
     comment.image_url = payload.image_url
     comment.updated_at = datetime.now(timezone.utc)
 
+    # Edits must be reviewed again rather than inheriting approval for old text.
+    comment.moderation_status = "pending_review"
+    comment.is_hidden = True
+    comment.moderation_reason = "Edited content requires admin review."
+
     db.commit()
     db.refresh(comment)
+    RankingService.refresh_topic_and_rankings(db, comment.topic_id)
     return comment
 
 
-@app.delete("/api/comments/{comment_id}")
+@app.delete("/api/comments/{comment_id}", dependencies=[Depends(require_admin)])
 def delete_comment(comment_id: int, db: Session = Depends(get_db)):
     comment = get_comment_or_404(db, comment_id)
     topic_id = comment.topic_id
@@ -625,10 +628,12 @@ def delete_comment(comment_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/comments/{comment_id}/like")
 def like_comment(
-    comment_id: int, payload: CommentLikeRequest, db: Session = Depends(get_db)
+    comment_id: int, payload: CommentLikeRequest, db: Session = Depends(get_db), visitor_id: str = Depends(require_visitor)
 ):
     comment = get_comment_or_404(db, comment_id)
-    like = CommentLike(comment_id=comment_id, user_identifier=payload.user_identifier)
+    if comment.is_hidden or comment.moderation_status != "approved":
+        raise HTTPException(status_code=404, detail="Comment not found")
+    like = CommentLike(comment_id=comment_id, user_identifier=visitor_id)
     db.add(like)
     try:
         db.commit()
@@ -650,15 +655,16 @@ def like_comment(
 @app.delete("/api/comments/{comment_id}/like")
 def unlike_comment(
     comment_id: int,
-    user_identifier: str = Query(..., min_length=2),
+    user_identifier: str = Query(..., min_length=2, max_length=100),
     db: Session = Depends(get_db),
+    visitor_id: str = Depends(require_visitor),
 ):
     comment = get_comment_or_404(db, comment_id)
     like = (
         db.query(CommentLike)
         .filter(
             CommentLike.comment_id == comment_id,
-            CommentLike.user_identifier == user_identifier,
+            CommentLike.user_identifier == visitor_id,
         )
         .first()
     )
@@ -677,12 +683,14 @@ def unlike_comment(
 
 @app.post("/api/comments/{comment_id}/report", response_model=ReportOut)
 def report_comment(
-    comment_id: int, payload: ReportCreate, db: Session = Depends(get_db)
+    comment_id: int, payload: ReportCreate, db: Session = Depends(get_db), visitor_id: str = Depends(require_visitor)
 ):
-    get_comment_or_404(db, comment_id)
+    comment = get_comment_or_404(db, comment_id)
+    if comment.is_hidden or comment.moderation_status != "approved":
+        raise HTTPException(status_code=404, detail="Comment not found")
     report = Report(
         comment_id=comment_id,
-        reporter_identifier=payload.reporter_identifier,
+        reporter_identifier=visitor_id,
         reason=payload.reason,
         details=payload.details,
         status="open",
@@ -698,25 +706,7 @@ def report_comment(
 
     db.refresh(report)
 
-    # Immediately move comment to pending_review so it appears in the admin queue
-    comment = get_comment_or_404(db, comment_id)
-    if comment.moderation_status == "approved":
-        comment.moderation_status = "pending_review"
-        comment.is_hidden = True
-        comment.moderation_reason = "Flagged by user report, pending admin review."
-        comment.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        ModerationService.create_log(
-            db,
-            comment_id=comment.id,
-            source="auto",
-            action="flagged_by_report",
-            result="pending_review",
-            flags=["user_report"],
-            reason=comment.moderation_reason,
-        )
-        RankingService.refresh_topic_and_rankings(db, comment.topic_id)
-
+    # Anonymous reports request review; they cannot unpublish someone else's comment.
     return report
 
 
@@ -725,11 +715,12 @@ def report_comment(
     response_model=list[ReportOut],
     dependencies=[Depends(require_admin)],
 )
-def list_reports(status: str = Query(default="open"), db: Session = Depends(get_db)):
+def list_reports(status: str = Query(default="open", pattern="^(open|resolved)$"), limit: int = Query(default=100, ge=1, le=200), db: Session = Depends(get_db)):
     reports = (
         db.query(Report)
         .filter(Report.status == status)
         .order_by(Report.created_at.desc())
+        .limit(limit)
         .all()
     )
     return reports
@@ -740,16 +731,16 @@ def list_reports(status: str = Query(default="open"), db: Session = Depends(get_
     response_model=list[ModerationQueueItem],
     dependencies=[Depends(require_admin)],
 )
-def moderation_queue(db: Session = Depends(get_db)):
+def moderation_queue(limit: int = Query(default=100, ge=1, le=200), db: Session = Depends(get_db)):
     """
-    Only return comments pending review.
-    Approved/rejected comments move to processed list.
+    Return pending comments and published comments with unresolved reports.
     """
     queue_items = (
         db.query(Comment, Topic.title)
         .join(Topic, Comment.topic_id == Topic.id)
-        .filter(Comment.moderation_status == "pending_review")
+        .filter((Comment.moderation_status == "pending_review") | Comment.reports.any(Report.status == "open"))
         .order_by(Comment.created_at.desc())
+        .limit(limit)
         .all()
     )
     return [
@@ -799,7 +790,7 @@ def reopen_comment(comment_id: int, db: Session = Depends(get_db)):
     """
     comment = get_comment_or_404(db, comment_id)
     comment.moderation_status = "pending_review"
-    comment.is_hidden = False
+    comment.is_hidden = True
     comment.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(comment)
@@ -839,10 +830,14 @@ def admin_moderate_comment(
     elif payload.action == "hide":
         comment.is_hidden = True
     elif payload.action == "restore":
+        if comment.moderation_status != "approved":
+            raise HTTPException(status_code=409, detail="Approve the comment before restoring visibility.")
         comment.is_hidden = False
 
     comment.moderation_reason = payload.reason or comment.moderation_reason
     comment.updated_at = datetime.now(timezone.utc)
+    if payload.action in {"approve", "reject", "hide"}:
+        db.query(Report).filter(Report.comment_id == comment_id, Report.status == "open").update({Report.status: "resolved"})
     db.commit()
     db.refresh(comment)
 

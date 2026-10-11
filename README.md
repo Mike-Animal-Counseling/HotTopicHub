@@ -1,205 +1,96 @@
-# AI Builder Daily Hub
+# HotTopicHub
 
-AI Builder Daily Hub is a full-stack AI signal product with three core surfaces:
+**AI Builder Daily Hub — discover what's new in AI, discuss what matters.**
 
-- `Live Feed`: a continuous stream of fresh AI-builder topics collected from external sources
-- `Daily Top 10`: the strongest community-engaged topics from the last 24 hours inside the platform
-- `Daily History`: archived daily signal sets, browsable by date
+A full-stack hub that brings AI-builder news from multiple sources into one live feed, then turns community engagement into a daily Top 10.
 
-The system separates source collection from community ranking:
-
-1. external sources feed the hourly stream
-2. recent feed items are synced into interactive `Topic` records
-3. users like, comment, and click through to sources
-4. the platform ranks the last 24 hours of community signals into a daily top list
-
-## Stack
-
-- Backend: FastAPI, SQLAlchemy, SQLite
-- Frontend: React, Vite, React Router
-
-## Product Shape
-
-### Live Feed
-
-- Pulls from sources such as Hacker News, GitHub Trending, Product Hunt, Reddit, and selected RSS feeds
-- Scores and clusters source items into hourly batches
-- Uses a hybrid clustering pass that combines title similarity, semantic similarity, and token overlap to better merge rewrites of the same topic
-- Presents recent hourly batches as one continuous reading flow instead of manual hour-by-hour browsing
-- Supports `Refresh Feed`, passive new-item detection, and incremental `Load more`
-- Works as the lightweight discovery surface
-- Clicking a title opens the discussion thread for that topic
-
-### Daily Top 10
-
-- Built from platform interaction, not external source rank alone
-- Ranking signals:
-  - likes
-  - comments
-  - source clicks
-  - recency boost
-- Caps output so one source cannot dominate the list
-- Shows richer editorial context:
-  - summary
-  - insight summary
-  - why it matters
-
-### Daily History
-
-- Lets users revisit prior daily top lists by date
-- Uses the current `Topic.date_key` model, not the old daily batch pipeline
-
-### Topic Detail
-
-- Full discussion page for a topic
-- Preserves navigation context so users can return to the originating surface such as `Daily Top 10`, `Daily History`, or `Live Feed`
-- Shows:
-  - summary
-  - key insights
-  - why it matters
-  - technical summary
-  - comments and ranked highlights
-  - source link
-
-### Moderation
-
-- Topic comments
-- Comment likes
-- Comment reports
-- Automatic moderation
-- Admin review queue and processed review list
-
-### AI Enrichment
-
-- Topics can include AI-generated:
-  - summary
-  - key insights
-  - why it matters
-  - technical summary
-- Falls back to deterministic template copy when AI enrichment is unavailable
-- Admins can trigger a manual rebuild for recent topics
-
-## Active Backend Routes
-
-### Topics
-
-- `GET /api/topics/daily-top-signals`
-- `GET /api/topics/history`
-- `GET /api/topics/history/{date_key}`
-- `GET /api/topics/{id}`
-- `POST /api/topics/{id}/like`
-- `DELETE /api/topics/{id}/like`
-- `POST /api/topics/{id}/source-click`
-- `GET /api/topics/{id}/comments`
-- `GET /api/topics/{id}/comments/highlights`
-- `POST /api/topics/{id}/comments`
-
-### Comments
-
-- `PATCH /api/comments/{id}`
-- `DELETE /api/comments/{id}`
-- `POST /api/comments/{id}/like`
-- `DELETE /api/comments/{id}/like`
-- `POST /api/comments/{id}/report`
-
-### Feed
-
-- `GET /api/feed/realtime`
-- `GET /api/feed/stream`
-- `POST /api/feed/realtime/refresh`
-- `GET /api/feed/history`
-
-### Admin
-
-Requires `X-ADMIN-TOKEN`.
-
-- `GET /api/admin/moderation/queue`
-- `GET /api/admin/moderation/processed`
-- `GET /api/admin/moderation/logs`
-- `GET /api/admin/reports`
-- `PATCH /api/admin/comments/{id}`
-- `POST /api/admin/comments/{id}/reopen`
-- `POST /api/admin/topics/enrich`
-
-## Current Backend Flow
-
-### Live Feed
-
-1. Fetch from source adapters
-2. Score raw articles for builder relevance
-3. Cluster related source items
-4. Select a diverse hourly batch
-5. Save `HourlyFeedBatch` and `HourlyFeedItem`
-6. Compose recent non-empty batches into a deduped continuous stream for the frontend
-
-### Topic Sync
-
-1. Read recent `HourlyFeedItem`
-2. Match or create `Topic`
-3. Attach enrichment fields:
-   - AI-generated summary
-   - summary
-   - key insights
-   - why it matters
-   - technical summary
-
-### Daily Top 10
-
-1. Read recent active `Topic`
-2. Compute engagement rank from platform activity
-3. Apply per-source cap
-4. Return top results for the last 24 hours
-
-## Main Files
-
-- Backend entrypoint: `backend/app/main.py`
-- Source collection: `backend/app/services/source_collection_service.py`
-- Hourly feed generation: `backend/app/services/hourly_feed_service.py`
-- Topic sync from feed: `backend/app/services/signal_topic_sync_service.py`
-- Topic enrichment: `backend/app/services/topic_enrichment_service.py`
-- Daily ranking: `backend/app/services/daily_top_signals_service.py`
-
-## Local Setup
-
-### Backend
-
-```powershell
-cd .\backend\
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python -m uvicorn app.main:app --reload
-```
-
-Notes:
-
-- The app refreshes the hourly feed on startup
-- Recent hourly items are synced into topics automatically
-- `Refresh Feed` rebuilds the current hourly batch, then reloads the continuous stream view
-- Default admin token: `dev-admin-token`
-- Active database: `backend/hot_topic_hub.db`
-- Optional AI topic enrichment via OpenRouter:
-  - Create `backend/.env` from `backend/.env.example`
-  - Set `OPENROUTER_API_KEY=...`
-  - Set `OPENROUTER_MODEL=deepseek/deepseek-chat`
-  - Set `AI_ENRICHMENT_ENABLED=true`
-  - Without a key, the backend falls back to deterministic template-based copy
-
-### Frontend
-
-```powershell
-cd .\frontend\
-npm install
-npm run dev
-```
-
-## Current Direction
-
-- `Live Feed` is the lightweight discovery and discussion entry point, presented as a continuous stream
-- `Daily Top 10` is the curated community signal page
-- `Daily History` is the archive surface
-- `Topic Detail` is the full reading and discussion surface
+[Demo](#demo) · [Features](#features) · [Quick start](#quick-start) · [Configuration](#configuration) · [Developer guide](docs/development.md) · [Security](SECURITY.md)
 
 ## Demo
 
-![Demo](demo-release0.gif)
+<p align="center">
+  <img src="demo-release0.gif" alt="HotTopicHub product demo" width="880" />
+</p>
+
+<p align="center"><em>Live discovery, daily community signals, and topic discussions in one place.</em></p>
+
+## Features
+
+| Surface | What you can do |
+| --- | --- |
+| **Live Feed** | Browse a continuous stream from Hacker News, GitHub Trending, Product Hunt, Reddit, and RSS feeds. Refresh for new topics or load more as you read. |
+| **Daily Top 10** | Find the strongest signals from the last 24 hours, ranked by likes, comments, source clicks, and recency, with a cap per source. |
+| **Daily History** | Revisit previous daily signal sets by date. |
+| **Topic discussions** | Read summaries, key insights, why a topic matters, and technical context. Join the discussion, like comments, or follow the original source. |
+
+**AI enrichment** adds editorial context through OpenRouter, with template-based fallback when AI is unavailable. **Moderation tools** support automatic comment review, reports, and an admin review queue.
+
+## Quick start
+
+Built with **React + Vite + React Router** on the frontend and **FastAPI + SQLAlchemy + SQLite** on the backend.
+
+You'll need Python 3.12+ and Node.js 20.19+ (20.x) or 22.12+. Run the backend and frontend in separate terminals.
+
+```bash
+git clone https://github.com/Mike-Animal-Counseling/HotTopicHub.git
+cd HotTopicHub
+```
+
+### 1. Start the backend
+
+From the repository root, in PowerShell:
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
+```
+
+<details>
+<summary>macOS / Linux commands</summary>
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
+```
+
+</details>
+
+The backend creates its SQLite database, refreshes the feed, and syncs recent items into topics on startup. Model downloads are optional and disabled by default.
+
+### 2. Start the frontend
+
+In a second terminal, from the repository root:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Open the app at **[localhost:5173](http://localhost:5173)**. The backend runs at [127.0.0.1:8000](http://127.0.0.1:8000), with interactive API documentation at [/docs](http://127.0.0.1:8000/docs).
+
+## Configuration
+
+The default is a read-only demo with admin access disabled. Copy [`backend/.env.example`](backend/.env.example) to `backend/.env` to configure optional features, then restart the backend.
+
+To try anonymous comments, likes, and reports locally, set `ALLOW_ANONYMOUS_INTERACTIONS=true`. Without a working moderation model, comments wait for admin review. To enable automatic text moderation, install `backend/requirements-moderation.txt` in the backend virtual environment and set `MODERATION_MODEL_ENABLED=true`; the first enabled launch downloads model weights. Image attachments always need manual review.
+
+The app uses template-based summaries without an OpenRouter key. For AI enrichment, set:
+
+```dotenv
+AI_ENRICHMENT_ENABLED=true
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_MODEL=deepseek/deepseek-chat
+```
+
+For moderation tools, generate a random `ADMIN_TOKEN` of at least 32 characters in `backend/.env`, then enter it on the app's **Admin** page. There is no default admin token. Admin credentials are stored only for the current browser tab. Visitors can reload the latest feed; only admins can force a fresh collection.
+
+Before exposing an instance, follow the deployment requirements in [SECURITY.md](SECURITY.md). See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and dependency updates.
+
+See the [developer guide](docs/development.md) for the data flow, backend routes, and main source files.

@@ -5,6 +5,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 
+def read_response(response, limit: int = 2 * 1024 * 1024) -> bytes:
+    """Cap memory use even when a remote source omits Content-Length."""
+    payload = response.read(limit + 1)
+    if len(payload) > limit:
+        raise ValueError("Source response exceeds the size limit.")
+    return payload
+
+
 @dataclass
 class RawArticle:
     title: str
