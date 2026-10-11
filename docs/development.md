@@ -14,7 +14,7 @@ HotTopicHub separates external source collection from community ranking. Externa
 4. Select a diverse hourly batch and save `HourlyFeedBatch` and `HourlyFeedItem` records.
 5. Compose recent non-empty batches into a deduplicated, continuous stream.
 
-The frontend supports manual refresh, passive new-item detection, and incremental loading. **Refresh Feed** rebuilds the current hourly batch and reloads the stream. Topic titles open their discussion pages.
+The frontend supports manual refresh, passive new-item detection, and incremental loading. **Refresh Feed** reloads the cached stream for visitors; admins can also rebuild the current hourly batch. Topic titles open their discussion pages. Public GET routes read stored data without initiating collection or enrichment.
 
 ### Topic sync and enrichment
 
@@ -57,6 +57,8 @@ For request parameters and response schemas, use [FastAPI's interactive document
 | `POST`, `DELETE` | `/api/comments/{comment_id}/like` | Add or remove a comment like |
 | `POST` | `/api/comments/{comment_id}/report` | Report a comment |
 
+Editing and deletion require `X-ADMIN-TOKEN`; edits return to hidden, pending review. Reports request admin review and cannot automatically hide published content.
+
 ### Feed
 
 | Method | Route | Purpose |
@@ -65,6 +67,8 @@ For request parameters and response schemas, use [FastAPI's interactive document
 | `GET` | `/api/feed/stream` | Read the continuous feed |
 | `POST` | `/api/feed/realtime/refresh` | Refresh an hourly batch |
 | `GET` | `/api/feed/history` | List hourly batches |
+
+Feed refresh requires `X-ADMIN-TOKEN`. Anonymous comments, likes, reports, and source clicks require `ALLOW_ANONYMOUS_INTERACTIONS=true` and a valid signed visitor cookie issued on an API GET. Payload identifiers never grant ownership or identity.
 
 ### Admin
 
@@ -98,7 +102,7 @@ All admin routes require an `X-ADMIN-TOKEN` header matching `ADMIN_TOKEN`. The f
 ## Local development notes
 
 - Start the backend from `backend/`; the relative SQLite path creates `backend/hot_topic_hub.db`.
-- The frontend API client points to `http://127.0.0.1:8000`. CORS permits frontend origins at `http://localhost:5173` and `http://127.0.0.1:5173`.
-- Startup refreshes the hourly feed, syncs topics, and preloads the Detoxify moderation model. A background task refreshes the feed at hourly boundaries.
+- The frontend uses same-origin `/api` requests. Vite proxies them to `http://127.0.0.1:8000`, preserving visitor cookies. `VITE_API_BASE_URL` can override the API origin; never put secrets in a `VITE_` variable.
+- Startup refreshes the hourly feed and syncs topics. A background task refreshes the feed at hourly boundaries. Optional Detoxify preloading requires `MODERATION_MODEL_ENABLED=true`; model failure keeps comments pending instead of approving unchecked content.
 - `OPENROUTER_TIMEOUT_SECONDS` controls the AI request timeout and defaults to `20`.
-- Frontend checks: run `npm run lint` and `npm run build` from `frontend/`.
+- See [CONTRIBUTING.md](../CONTRIBUTING.md) for regression tests, audits, and lockfile updates, and [SECURITY.md](../SECURITY.md) for deployment constraints.

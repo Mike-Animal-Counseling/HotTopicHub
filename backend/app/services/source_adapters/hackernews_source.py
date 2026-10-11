@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from urllib.request import Request, urlopen
+from urllib.request import Request
+from ..http_client import open_https as urlopen
 
-from .base_source import BaseSourceAdapter, RawArticle
+from .base_source import BaseSourceAdapter, RawArticle, read_response
 
 
 class HackerNewsSourceAdapter(BaseSourceAdapter):
@@ -29,21 +30,21 @@ class HackerNewsSourceAdapter(BaseSourceAdapter):
                 headers={"User-Agent": "AI-Builder-Daily/1.0"},
             )
             with urlopen(request, timeout=8) as response:
-                top_ids = json.loads(response.read().decode("utf-8"))
+                top_ids = json.loads(read_response(response).decode("utf-8"))
 
             best_request = Request(
                 self._BEST_STORIES_URL,
                 headers={"User-Agent": "AI-Builder-Daily/1.0"},
             )
             with urlopen(best_request, timeout=8) as response:
-                best_ids = json.loads(response.read().decode("utf-8"))
+                best_ids = json.loads(read_response(response).decode("utf-8"))
 
             new_request = Request(
                 self._NEW_STORIES_URL,
                 headers={"User-Agent": "AI-Builder-Daily/1.0"},
             )
             with urlopen(new_request, timeout=8) as response:
-                new_ids = json.loads(response.read().decode("utf-8"))
+                new_ids = json.loads(read_response(response).decode("utf-8"))
 
             candidate_ids: list[int] = []
             seen_ids: set[int] = set()
@@ -61,7 +62,7 @@ class HackerNewsSourceAdapter(BaseSourceAdapter):
                     headers={"User-Agent": "AI-Builder-Daily/1.0"},
                 )
                 with urlopen(item_request, timeout=8) as item_response:
-                    item = json.loads(item_response.read().decode("utf-8"))
+                    item = json.loads(read_response(item_response).decode("utf-8"))
 
                 if not item or item.get("type") != "story" or not item.get("title"):
                     continue

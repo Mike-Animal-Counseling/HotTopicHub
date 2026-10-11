@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
+import { api, hasAdminToken } from "../api";
 import { FeedTopicRow } from "../components/TopicSignalCard";
 
 let cachedFeedStream = null;
@@ -114,7 +114,7 @@ export default function RealtimeFeedPage() {
   async function handleRefresh() {
     try {
       setRefreshing(true);
-      await api.refreshRealtimeFeed(undefined, true);
+      if (hasAdminToken()) await api.refreshRealtimeFeed(undefined, true);
       const streamData = await api.getRealtimeFeedStream(60, 24);
       replaceFeed(streamData);
       setError("");

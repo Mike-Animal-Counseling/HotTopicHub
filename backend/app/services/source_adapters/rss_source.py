@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from urllib.request import Request, urlopen
+from urllib.request import Request
+from ..http_client import open_https as urlopen
 
-from .base_source import BaseSourceAdapter, RawArticle
+from .base_source import BaseSourceAdapter, RawArticle, read_response
 
 
 class RSSSourceAdapter(BaseSourceAdapter):
@@ -25,7 +26,7 @@ class RSSSourceAdapter(BaseSourceAdapter):
                 headers={"User-Agent": "AI-Builder-Daily/1.0"},
             )
             with urlopen(request, timeout=8) as response:
-                xml_data = response.read()
+                xml_data = read_response(response)
 
             root = ET.fromstring(xml_data)
             items = []

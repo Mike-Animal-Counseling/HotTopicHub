@@ -1,12 +1,13 @@
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = import.meta.env?.VITE_API_BASE_URL || "";
 
-// Read admin token from localStorage
+// Admin credentials last only for this tab; discard the old persistent token.
 function getAdminToken() {
-  return localStorage.getItem("ADMIN_TOKEN") || "";
+  localStorage.removeItem("ADMIN_TOKEN");
+  return sessionStorage.getItem("ADMIN_TOKEN") || "";
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, options);
+  const response = await fetch(`${API_BASE}${path}`, { credentials: "include", ...options });
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json")
     ? await response.json()
@@ -43,6 +44,7 @@ export const api = {
       .join("&");
     return request(`/api/feed/realtime/refresh${params ? `?${params}` : ""}`, {
       method: "POST",
+      headers: { "X-ADMIN-TOKEN": getAdminToken() },
     });
   },
   getFeedHistory: (limit = 24) =>
@@ -148,16 +150,16 @@ export const api = {
 // Token management exports
 export function setAdminToken(token) {
   if (token) {
-    localStorage.setItem("ADMIN_TOKEN", token);
+    sessionStorage.setItem("ADMIN_TOKEN", token);
   } else {
-    localStorage.removeItem("ADMIN_TOKEN");
+    sessionStorage.removeItem("ADMIN_TOKEN");
   }
 }
 
 export function hasAdminToken() {
-  return !!localStorage.getItem("ADMIN_TOKEN");
+  return !!getAdminToken();
 }
 
 export function getStoredAdminToken() {
-  return localStorage.getItem("ADMIN_TOKEN") || "";
+  return getAdminToken();
 }

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 
 ModerationStatus = Literal["approved", "pending_review", "rejected"]
@@ -41,24 +41,36 @@ class TopicOut(BaseModel):
     is_active: bool
     date_key: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TopicLikeRequest(BaseModel):
-    user_identifier: str = Field(min_length=2, max_length=100)
+    # Accepted for compatibility; authorization uses the signed visitor cookie.
+    user_identifier: str = Field(default="anonymous", min_length=2, max_length=100)
 
 
-class CommentCreate(BaseModel):
+class ImageAttachment(BaseModel):
+    image_url: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("image_url")
+    @classmethod
+    def validate_image_url(cls, value):
+        if value is None:
+            return None
+        parsed = HttpUrl(value)
+        if parsed.username or parsed.password:
+            raise ValueError("Image URLs must not contain credentials.")
+        return str(parsed)
+
+
+class CommentCreate(ImageAttachment):
     author_name: str = Field(min_length=1, max_length=120)
-    user_identifier: str = Field(min_length=2, max_length=100)
+    user_identifier: str = Field(default="anonymous", min_length=2, max_length=100)
     text: str = Field(min_length=1, max_length=3000)
-    image_url: str | None = None
 
 
-class CommentUpdate(BaseModel):
+class CommentUpdate(ImageAttachment):
     text: str | None = Field(default=None, min_length=1, max_length=3000)
-    image_url: str | None = None
 
 
 class CommentOut(BaseModel):
@@ -75,8 +87,7 @@ class CommentOut(BaseModel):
     moderation_flags: str | None
     is_hidden: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RankedCommentOut(BaseModel):
@@ -90,13 +101,13 @@ class RankedCommentOut(BaseModel):
 
 
 class CommentLikeRequest(BaseModel):
-    user_identifier: str = Field(min_length=2, max_length=100)
+    user_identifier: str = Field(default="anonymous", min_length=2, max_length=100)
 
 
 class ReportCreate(BaseModel):
-    reporter_identifier: str = Field(min_length=2, max_length=100)
+    reporter_identifier: str = Field(default="anonymous", min_length=2, max_length=100)
     reason: ReportReason
-    details: str | None = None
+    details: str | None = Field(default=None, max_length=2000)
 
 
 class ReportOut(BaseModel):
@@ -108,8 +119,7 @@ class ReportOut(BaseModel):
     created_at: datetime
     status: Literal["open", "resolved"]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ModerationQueueItem(BaseModel):
@@ -128,7 +138,7 @@ class ModerationQueueItem(BaseModel):
 
 class AdminCommentActionRequest(BaseModel):
     action: AdminAction
-    reason: str | None = None
+    reason: str | None = Field(default=None, max_length=1000)
 
 
 class ModerationLogOut(BaseModel):
@@ -141,8 +151,7 @@ class ModerationLogOut(BaseModel):
     reason: str | None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CommentCreateResponse(BaseModel):
@@ -169,8 +178,7 @@ class DailyTopSignalOut(BaseModel):
     engagement_score: float
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DailyTopSignalsResponse(BaseModel):
@@ -210,8 +218,7 @@ class HourlyFeedItemOut(BaseModel):
     feed_score: float
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class HourlyFeedBatchOut(BaseModel):
@@ -248,5 +255,4 @@ class FeedStreamResponse(BaseModel):
 class CommentListResponse(BaseModel):
     items: list[CommentOut]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

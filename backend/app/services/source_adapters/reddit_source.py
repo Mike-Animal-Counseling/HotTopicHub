@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from urllib.request import Request, urlopen
+from urllib.request import Request
+from ..http_client import open_https as urlopen
 
-from .base_source import BaseSourceAdapter, RawArticle
+from .base_source import BaseSourceAdapter, RawArticle, read_response
 
 
 class RedditSourceAdapter(BaseSourceAdapter):
@@ -42,7 +43,7 @@ class RedditSourceAdapter(BaseSourceAdapter):
                 },
             )
             with urlopen(request, timeout=8) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+                payload = json.loads(read_response(response).decode("utf-8"))
 
             items = payload.get("data", {}).get("children", [])
             articles: list[RawArticle] = []

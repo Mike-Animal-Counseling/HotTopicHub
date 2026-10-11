@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib import error, request
 
 from dotenv import load_dotenv
+from .http_client import open_https
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 
@@ -145,13 +146,16 @@ class AIEnrichmentService:
             method="POST",
         )
         try:
-            with request.urlopen(req, timeout=timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
+            with open_https(req, timeout=timeout_seconds) as response:
+                response_body = response.read(1024 * 1024 + 1)
+                if len(response_body) > 1024 * 1024:
+                    raise ValueError("AI response exceeds the size limit.")
+                return json.loads(response_body.decode("utf-8"))
         except error.HTTPError as exc:
-            error_body = exc.read().decode("utf-8", errors="ignore")
-            logger.warning("OpenRouter enrichment HTTP %s: %s", exc.code, error_body[:400])
+            # Provider error bodies may contain submitted content or credentials.
+            logger.warning("OpenRouter enrichment HTTP %s", exc.code)
         except Exception as exc:
-            logger.warning("OpenRouter enrichment request failed: %s", exc)
+            logger.warning("OpenRouter enrichment request failed (%s)", type(exc).__name__)
         return None
 
     @staticmethod

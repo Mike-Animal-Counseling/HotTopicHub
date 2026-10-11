@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
-
-const DEFAULT_USER = "guest-user";
+import { safeExternalUrl } from "../safe-url";
 
 export default function TopicDetailPage() {
   const { topicId } = useParams();
@@ -16,7 +15,6 @@ export default function TopicDetailPage() {
   const [notice, setNotice] = useState("");
 
   const [authorName, setAuthorName] = useState("Guest");
-  const [userIdentifier, setUserIdentifier] = useState(DEFAULT_USER);
   const [text, setText] = useState("");
   const [imageUrl, setImageUrl] = useState("");
 
@@ -73,7 +71,6 @@ export default function TopicDetailPage() {
   async function submitComment() {
     const payload = {
       author_name: authorName.trim() || "Guest",
-      user_identifier: userIdentifier.trim() || DEFAULT_USER,
       text: text.trim(),
       image_url: imageUrl.trim() || null,
     };
@@ -103,7 +100,7 @@ export default function TopicDetailPage() {
 
   async function handleTopicLike() {
     try {
-      await api.likeTopic(normalizedTopicId, userIdentifier.trim() || DEFAULT_USER);
+      await api.likeTopic(normalizedTopicId);
       await loadAll();
     } catch (err) {
       setNotice(err.message || "Failed to like topic");
@@ -116,7 +113,7 @@ export default function TopicDetailPage() {
 
   async function likeComment(commentId) {
     try {
-      await api.likeComment(commentId, userIdentifier.trim() || DEFAULT_USER);
+      await api.likeComment(commentId);
       await loadAll();
     } catch (err) {
       setNotice(err.message || "Failed to like comment");
@@ -126,7 +123,6 @@ export default function TopicDetailPage() {
   async function reportComment(commentId) {
     try {
       await api.reportComment(commentId, {
-        reporter_identifier: userIdentifier.trim() || DEFAULT_USER,
         reason: "other",
         details: "Reported by user from topic detail page.",
       });
@@ -179,9 +175,9 @@ export default function TopicDetailPage() {
               <span className="detail-stat">
                 {topic.source_clicks_count || 0} source clicks
               </span>
-              {(topic.canonical_url || topic.source_url) && (
+              {safeExternalUrl(topic.canonical_url || topic.source_url) && (
                 <a
-                  href={topic.canonical_url || topic.source_url}
+                  href={safeExternalUrl(topic.canonical_url || topic.source_url)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="detail-source-link"
@@ -224,12 +220,6 @@ export default function TopicDetailPage() {
             value={authorName}
             onChange={(e) => setAuthorName(e.target.value)}
             placeholder="Your name"
-          />
-          <input
-            className="detail-input"
-            value={userIdentifier}
-            onChange={(e) => setUserIdentifier(e.target.value)}
-            placeholder="User identifier"
           />
         </div>
         <textarea
@@ -278,10 +268,12 @@ export default function TopicDetailPage() {
             ) : (
               <>
                 <p className="comment-body">{comment.text}</p>
-                {comment.image_url && (
+                {safeExternalUrl(comment.image_url) && (
                   <img
                     className="comment-image"
-                    src={comment.image_url}
+                    src={safeExternalUrl(comment.image_url)}
+                    referrerPolicy="no-referrer"
+                    loading="lazy"
                     alt="Comment attachment"
                   />
                 )}

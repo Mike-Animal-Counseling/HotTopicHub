@@ -110,15 +110,19 @@ class SemanticRelevanceService:
     def _ensure_transformer():
         if SemanticRelevanceService._transformer_ready is not None:
             return SemanticRelevanceService._transformer_ready
+        revision = os.getenv("EMBEDDING_MODEL_REVISION", "")
+        if os.getenv("EMBEDDING_MODEL_ENABLED", "false").lower() != "true" or not re.fullmatch(r"[0-9a-f]{40}", revision):
+            SemanticRelevanceService._transformer_ready = (None, False)
+            return SemanticRelevanceService._transformer_ready
         try:
             import torch
             from transformers import AutoModel, AutoTokenizer
 
             SemanticRelevanceService._tokenizer = AutoTokenizer.from_pretrained(
-                SemanticRelevanceService.MODEL_NAME
+                SemanticRelevanceService.MODEL_NAME, revision=revision, trust_remote_code=False
             )
             SemanticRelevanceService._model = AutoModel.from_pretrained(
-                SemanticRelevanceService.MODEL_NAME
+                SemanticRelevanceService.MODEL_NAME, revision=revision, trust_remote_code=False, use_safetensors=True
             )
             SemanticRelevanceService._model.eval()
             SemanticRelevanceService._transformer_ready = (torch, True)

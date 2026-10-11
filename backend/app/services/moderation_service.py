@@ -1,4 +1,6 @@
 import re
+import os
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -9,6 +11,7 @@ from app.models import Comment, ModerationLog, Report
 
 class ModerationService:
     _detoxify_model: Optional[object] = None
+    _model_load_failed = False
     TOXICITY_THRESHOLD_PENDING = 0.5  # Flag for review
     TOXICITY_THRESHOLD_REJECT = 0.9  # Auto-reject (very high toxicity)
 
@@ -18,12 +21,15 @@ class ModerationService:
     @staticmethod
     def _get_detoxify_model():
         """Lazy load Detoxify model on first use."""
+        if os.getenv("MODERATION_MODEL_ENABLED", "false").lower() != "true" or ModerationService._model_load_failed:
+            return None
         if ModerationService._detoxify_model is None:
             try:
                 from detoxify import Detoxify
 
                 ModerationService._detoxify_model = Detoxify("original", device="cpu")
             except Exception as e:
+                ModerationService._model_load_failed = True
                 print(f"Warning: Failed to load Detoxify model: {e}")
                 return None
         return ModerationService._detoxify_model
@@ -38,7 +44,7 @@ class ModerationService:
     def image_moderation_hook(image_url: str | None) -> tuple[list[str], str | None]:
         if not image_url:
             return [], None
-        return [], None
+        return ["image_review_required"], "Image attachments require manual review."
 
     @staticmethod
     def _normalize_text(text: str) -> str:
@@ -52,13 +58,14 @@ class ModerationService:
         """
         model = ModerationService._get_detoxify_model()
         if not model:
-            # Fallback: if model fails to load, return 0 (no toxicity)
-            return 0.0, []
+            return 0.0, ["moderation_unavailable"]
 
         try:
             results = model.predict(text)
             # Detoxify returns scores for: toxicity, severe_toxicity, obscene, threat, insult, identity_attack
-            toxicity_score = results.get("toxicity", 0.0)
+            toxicity_score = float(results["toxicity"])
+            if not math.isfinite(toxicity_score) or not 0 <= toxicity_score <= 1:
+                return 0.0, ["moderation_unavailable"]
 
             flags = []
             if toxicity_score > ModerationService.TOXICITY_THRESHOLD_PENDING:
@@ -74,7 +81,7 @@ class ModerationService:
             return toxicity_score, flags
         except Exception as e:
             print(f"Warning: Detoxify inference failed: {e}")
-            return 0.0, []
+            return 0.0, ["moderation_unavailable"]
 
     @staticmethod
     def run_text_rules(
@@ -173,6 +180,7 @@ class ModerationService:
             or "detoxify_severe_toxicity" in flags
             or "detoxify_threat" in flags
             or "detoxify_identity_attack" in flags
+            or "moderation_unavailable" in flags
         ):
             return {
                 "status": "pending_review",
@@ -205,7 +213,7 @@ class ModerationService:
             reason = f"{reason} {image_reason}".strip()
 
         return {
-            "status": text_result["status"],
+            "status": "pending_review" if image_flags and text_result["status"] == "approved" else text_result["status"],
             "flags": sorted(set(flags)),
             "reason": reason,
         }
