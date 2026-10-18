@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import { DailyTopCard } from "../components/TopicSignalCard";
 
@@ -9,26 +9,24 @@ export default function TopicsPage() {
   const [loading, setLoading] = useState(cachedDailySignals.length === 0);
   const [error, setError] = useState("");
 
-  const loadSignals = useCallback(async () => {
-    try {
-      if (cachedDailySignals.length === 0) {
-        setLoading(true);
-      }
-      const signalsData = await api.getDailyTopSignals();
-      const items = signalsData.items || [];
-      cachedDailySignals = items;
-      setDailySignals(items);
-      setError("");
-    } catch (err) {
-      setError(err.message || "Failed to load daily top signals");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    loadSignals();
-  }, [loadSignals]);
+    let active = true;
+    api.getDailyTopSignals()
+      .then((signalsData) => {
+        if (!active) return;
+        const items = signalsData.items || [];
+        cachedDailySignals = items;
+        setDailySignals(items);
+        setError("");
+      })
+      .catch((err) => {
+        if (active) setError(err.message || "Failed to load daily top signals");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   return (
     <div className="page-wrap leaderboard-page">

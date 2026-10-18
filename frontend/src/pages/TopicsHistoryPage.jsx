@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { DailyTopCard } from "../components/TopicSignalCard";
@@ -29,67 +29,60 @@ export default function TopicsHistoryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedDate = searchParams.get("date") || "";
   const [history, setHistory] = useState(cachedHistoryItems);
-  const [topics, setTopics] = useState(
-    selectedDate ? (cachedTopicsByDate.get(selectedDate) || []) : [],
-  );
+  const [topicResult, setTopicResult] = useState(null);
   const [loading, setLoading] = useState(cachedHistoryItems.length === 0);
-  const [error, setError] = useState("");
+  const [historyError, setHistoryError] = useState("");
+  const currentResult = topicResult?.dateKey === selectedDate ? topicResult : null;
+  const cachedTopics = cachedTopicsByDate.get(selectedDate);
+  const topics = currentResult?.items || cachedTopics || [];
+  const topicsLoading = Boolean(selectedDate && !currentResult && !cachedTopics);
+  const error = currentResult?.error || historyError;
 
-  const loadHistory = useCallback(async () => {
-    try {
-      if (cachedHistoryItems.length === 0) {
-        setLoading(true);
-      }
-      const data = await api.getDailySignalHistory(45);
-      const items = data.items || [];
-      cachedHistoryItems = items;
-      setHistory(items);
-      const initialDate = items[0]?.date_key || "";
-      if (!selectedDate && initialDate) {
-        const nextParams = new URLSearchParams(searchParams);
-        nextParams.set("date", initialDate);
-        setSearchParams(nextParams, { replace: true });
-      }
-      setError("");
-    } catch (err) {
-      setError(err.message || "Failed to load daily history");
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    let active = true;
+    api.getDailySignalHistory(45)
+      .then((data) => {
+        if (!active) return;
+        const items = data.items || [];
+        cachedHistoryItems = items;
+        setHistory(items);
+        const initialDate = items[0]?.date_key || "";
+        if (!selectedDate && initialDate) {
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.set("date", initialDate);
+          setSearchParams(nextParams, { replace: true });
+        }
+        setHistoryError("");
+      })
+      .catch((err) => {
+        if (active) setHistoryError(err.message || "Failed to load daily history");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
   }, [searchParams, selectedDate, setSearchParams]);
 
-  const loadDateTopics = useCallback(async (dateKey) => {
-    if (!dateKey) {
-      setTopics([]);
-      return;
-    }
-    const cachedTopics = cachedTopicsByDate.get(dateKey);
-    if (cachedTopics) {
-      setTopics(cachedTopics);
-    }
-    try {
-      const data = await api.getDailySignalsForDate(dateKey);
-      const items = data.items || [];
-      cachedTopicsByDate.set(dateKey, items);
-      setTopics(items);
-      setError("");
-    } catch (err) {
-      setError(err.message || "Failed to load archived daily topics");
-    }
-  }, []);
-
   useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
-
-  useEffect(() => {
-    if (selectedDate) {
-      loadDateTopics(selectedDate);
-    } else if (cachedHistoryItems[0]?.date_key) {
-      const fallbackTopics = cachedTopicsByDate.get(cachedHistoryItems[0].date_key) || [];
-      setTopics(fallbackTopics);
-    }
-  }, [loadDateTopics, selectedDate]);
+    if (!selectedDate) return;
+    let active = true;
+    api.getDailySignalsForDate(selectedDate)
+      .then((data) => {
+        if (!active) return;
+        const items = data.items || [];
+        cachedTopicsByDate.set(selectedDate, items);
+        setTopicResult({ dateKey: selectedDate, items, error: "" });
+      })
+      .catch((err) => {
+        if (!active) return;
+        setTopicResult({
+          dateKey: selectedDate,
+          items: cachedTopicsByDate.get(selectedDate) || [],
+          error: err.message || "Failed to load archived daily topics",
+        });
+      });
+    return () => { active = false; };
+  }, [selectedDate]);
 
   const selectedLabel = useMemo(
     () => (selectedDate ? formatDateLabel(selectedDate) : "No day selected"),
@@ -140,6 +133,8 @@ export default function TopicsHistoryPage() {
         <div className="daily-signals-list">
           {loading && history.length === 0 ? (
             <div className="daily-signals-empty">Loading daily history...</div>
+          ) : topicsLoading ? (
+            <div className="daily-signals-empty">Loading archived topics...</div>
           ) : topics.length === 0 ? (
             <div className="daily-signals-empty">
               No archived topics for this date yet.

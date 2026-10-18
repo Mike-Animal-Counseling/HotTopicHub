@@ -40,18 +40,16 @@ export default function RealtimeFeedPage() {
   const [feed, setFeed] = useState(cachedFeedStream);
   const [loading, setLoading] = useState(!cachedFeedStream);
   const [refreshing, setRefreshing] = useState(false);
-  const [checking, setChecking] = useState(false);
+  const [checking, setChecking] = useState(Boolean(cachedFeedStream));
   const [error, setError] = useState("");
   const [pendingFeed, setPendingFeed] = useState(cachedPendingFeed);
   const [pendingCount, setPendingCount] = useState(cachedPendingCount);
   const [visibleCount, setVisibleCount] = useState(cachedVisibleCount);
-  const feedRef = useRef(null);
-
-  useEffect(() => {
-    feedRef.current = feed;
-  }, [feed]);
+  const feedRef = useRef(cachedFeedStream);
+  const requestVersion = useRef(0);
 
   const replaceFeed = useCallback((nextFeed) => {
+    feedRef.current = nextFeed;
     cachedFeedStream = nextFeed;
     cachedPendingFeed = null;
     cachedPendingCount = 0;
@@ -63,14 +61,10 @@ export default function RealtimeFeedPage() {
   }, []);
 
   const loadFeed = useCallback(
-    async ({ silent = false, adopt = true } = {}) => {
-      try {
-        if (!silent && !cachedFeedStream) {
-          setLoading(true);
-        } else {
-          setChecking(true);
-        }
-        const streamData = await api.getRealtimeFeedStream(60, 24);
+    ({ adopt = true } = {}) => {
+      const version = ++requestVersion.current;
+      return api.getRealtimeFeedStream(60, 24).then((streamData) => {
+        if (version !== requestVersion.current) return;
         const currentFeed = feedRef.current;
         if (!adopt && currentFeed) {
           const currentIds = new Set((currentFeed.items || []).map((item) => item.id));
@@ -90,38 +84,51 @@ export default function RealtimeFeedPage() {
           replaceFeed(streamData);
         }
         setError("");
-      } catch (err) {
-        setError(err.message || "Failed to load live feed");
-      } finally {
-        setLoading(false);
-        setChecking(false);
-      }
+      }).catch((err) => {
+        if (version === requestVersion.current) {
+          setError(err.message || "Failed to load live feed");
+        }
+      }).finally(() => {
+        if (version === requestVersion.current) {
+          setLoading(false);
+          setChecking(false);
+        }
+      });
     },
     [replaceFeed],
   );
 
   useEffect(() => {
     loadFeed();
+    return () => { requestVersion.current += 1; };
   }, [loadFeed]);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      loadFeed({ silent: true, adopt: false });
+      if (refreshing) return;
+      setChecking(true);
+      loadFeed({ adopt: false });
     }, 45000);
     return () => clearInterval(interval);
-  }, [loadFeed]);
+  }, [loadFeed, refreshing]);
 
   async function handleRefresh() {
+    const version = ++requestVersion.current;
     try {
       setRefreshing(true);
       if (hasAdminToken()) await api.refreshRealtimeFeed(undefined, true);
       const streamData = await api.getRealtimeFeedStream(60, 24);
+      if (version !== requestVersion.current) return;
       replaceFeed(streamData);
       setError("");
     } catch (err) {
-      setError(err.message || "Failed to refresh live feed");
+      if (version === requestVersion.current) setError(err.message || "Failed to refresh live feed");
     } finally {
-      setRefreshing(false);
+      if (version === requestVersion.current) {
+        setRefreshing(false);
+        setLoading(false);
+        setChecking(false);
+      }
     }
   }
 
