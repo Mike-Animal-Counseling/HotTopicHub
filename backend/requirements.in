@@ -1,5 +1,5 @@
 # Direct application dependencies; requirements.txt locks the full dependency tree.
-fastapi>=0.143.0,<0.144
+fastapi>=0.143.2,<0.144
 SQLAlchemy>=2.0.46,<2.1
 uvicorn>=0.40.0,<1
 python-dateutil>=2.9.0.post0,<3
