@@ -19,32 +19,26 @@ export default function AdminModerationPage() {
   const [approved, setApproved] = useState(cachedAdminState.approved);
   const [rejected, setRejected] = useState(cachedAdminState.rejected);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(
+    isAdmin && ["queue", "reports", "logs", "approved", "rejected"].every(
+      (key) => cachedAdminState[key].length === 0,
+    ),
+  );
   const [enriching, setEnriching] = useState(false);
   const [enrichMessage, setEnrichMessage] = useState(cachedAdminState.enrichMessage);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectCommentId, setRejectCommentId] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  const loadAdminData = useCallback(async () => {
+  const loadAdminData = useCallback((isActive = () => true) => {
     if (!hasAdminToken()) return;
-    if (
-      cachedAdminState.queue.length === 0
-      && cachedAdminState.reports.length === 0
-      && cachedAdminState.logs.length === 0
-      && cachedAdminState.approved.length === 0
-      && cachedAdminState.rejected.length === 0
-    ) {
-      setLoading(true);
-    }
-    try {
-      const [queueData, reportsData, logsData, processedData] =
-        await Promise.all([
-          api.getModerationQueue(),
-          api.getReports("open"),
-          api.getModerationLogs(),
-          api.getProcessedComments(),
-        ]);
+    return Promise.all([
+      api.getModerationQueue(),
+      api.getReports("open"),
+      api.getModerationLogs(),
+      api.getProcessedComments(),
+    ]).then(([queueData, reportsData, logsData, processedData]) => {
+      if (!isActive() || !hasAdminToken()) return;
       setQueue(queueData || []);
       setReports(reportsData || []);
       setLogs(logsData || []);
@@ -65,17 +59,17 @@ export default function AdminModerationPage() {
       setApproved(approvedData);
       setRejected(rejectedData);
       setError("");
-    } catch (err) {
-      setError(err.message || "Failed to load admin data");
-    } finally {
-      setLoading(false);
-    }
+    }).catch((err) => {
+      if (isActive() && hasAdminToken()) setError(err.message || "Failed to load admin data");
+    }).finally(() => {
+      if (isActive()) setLoading(false);
+    });
   }, []);
 
   useEffect(() => {
-    if (isAdmin) {
-      loadAdminData();
-    }
+    let active = true;
+    if (isAdmin) loadAdminData(() => active);
+    return () => { active = false; };
   }, [isAdmin, loadAdminData]);
 
   // Token login

@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { safeExternalUrl } from "../safe-url";
 
 export default function TopicDetailPage() {
   const { topicId } = useParams();
+  return <TopicDetail key={topicId} topicId={topicId} />;
+}
+
+function TopicDetail({ topicId }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [topic, setTopic] = useState(null);
@@ -18,55 +22,62 @@ export default function TopicDetailPage() {
   const [text, setText] = useState("");
   const [imageUrl, setImageUrl] = useState("");
 
+  const requestVersion = useRef(0);
   const normalizedTopicId = useMemo(() => Number(topicId), [topicId]);
+  const validTopicId = Number.isSafeInteger(normalizedTopicId) && normalizedTopicId > 0;
   const backTo = location.state?.backTo || "/topics";
   const backLabel = location.state?.backLabel || "Back to Hub";
 
-  const loadAll = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [topicData, commentsData] = await Promise.all([
-        api.getTopic(normalizedTopicId),
-        api.getComments(normalizedTopicId),
-      ]);
+  const loadAll = useCallback(() => {
+    const version = ++requestVersion.current;
+    return Promise.all([
+      api.getTopic(normalizedTopicId),
+      api.getComments(normalizedTopicId),
+    ]).then(async ([topicData, commentsData]) => {
+      if (version !== requestVersion.current) return;
+      let rankedData = [];
+      try {
+        rankedData = await api.getRankedComments(normalizedTopicId);
+      } catch {
+        // Highlights are optional; the topic and discussion remain available.
+      }
+      if (version !== requestVersion.current) return;
       setTopic(topicData);
       setComments(commentsData.items || []);
-      try {
-        const rankedData = await api.getRankedComments(normalizedTopicId);
-        setRankedComments(rankedData || []);
-      } catch {
-        setRankedComments([]);
-      }
+      setRankedComments(rankedData || []);
       setError("");
-    } catch (err) {
-      setError(err.message || "Failed to load topic details");
-    } finally {
-      setLoading(false);
-    }
+    }).catch((err) => {
+      if (version === requestVersion.current) {
+        setError(err.message || "Failed to load topic details");
+      }
+    }).finally(() => {
+      if (version === requestVersion.current) setLoading(false);
+    });
   }, [normalizedTopicId]);
 
   useEffect(() => {
-    if (Number.isNaN(normalizedTopicId)) {
-      setError("Invalid topic id");
-      setLoading(false);
-      return;
-    }
+    if (!validTopicId) return;
     loadAll();
-  }, [loadAll, normalizedTopicId]);
+    return () => { requestVersion.current += 1; };
+  }, [loadAll, validTopicId]);
 
   useEffect(() => {
-    if (Number.isNaN(normalizedTopicId)) return;
+    if (!validTopicId) return;
 
+    let active = true;
     const intervalId = setInterval(() => {
       api.getComments(normalizedTopicId)
         .then((data) => {
-          setComments(data.items || []);
+          if (active) setComments(data.items || []);
         })
         .catch(() => {});
     }, 10000);
 
-    return () => clearInterval(intervalId);
-  }, [normalizedTopicId]);
+    return () => {
+      active = false;
+      clearInterval(intervalId);
+    };
+  }, [normalizedTopicId, validTopicId]);
 
   async function submitComment() {
     const payload = {
@@ -131,6 +142,10 @@ export default function TopicDetailPage() {
     } catch (err) {
       setNotice(err.message || "Failed to report comment");
     }
+  }
+
+  if (!validTopicId) {
+    return <div className="page-wrap"><div className="error-box">Invalid topic id</div></div>;
   }
 
   if (loading) {
