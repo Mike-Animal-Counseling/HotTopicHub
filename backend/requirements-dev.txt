@@ -14,7 +14,7 @@ boolean-py==5.0
     # via license-expression
 cachecontrol==0.14.4
     # via pip-audit
-certifi==2026.7.22
+certifi==2026.10.19
     # via
     #   httpcore
     #   httpx
@@ -35,7 +35,7 @@ defusedxml==0.7.1
     #   py-serializable
 fastapi==0.143.0
     # via -r backend/requirements.in
-filelock==4.1.0
+filelock==4.2.1
     # via cachecontrol
 greenlet==3.5.6 ; platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64'
     # via sqlalchemy
