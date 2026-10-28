@@ -30,7 +30,7 @@ detoxify==0.5.2
     # via -r backend/requirements-moderation.in
 fastapi==0.143.0
     # via -r backend/requirements.in
-filelock==4.1.0
+filelock==4.2.1
     # via
     #   huggingface-hub
     #   torch
@@ -143,7 +143,7 @@ safetensors==0.8.0
     # via transformers
 sentencepiece==0.2.2
     # via detoxify
-setuptools==84.0.0
+setuptools==84.1.0
     # via torch
 shellingham==1.5.4
     # via typer
