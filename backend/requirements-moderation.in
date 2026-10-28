@@ -1,4 +1,4 @@
 -r requirements.in
 detoxify==0.5.2
 # Older Transformers 4 releases have unresolved advisories; do not downgrade.
-transformers>=5.10.0,<6
+transformers>=5.20.2,<6
