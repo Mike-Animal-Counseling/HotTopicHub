@@ -9,7 +9,7 @@ A full-stack hub that brings AI-builder news from multiple sources into one live
 ## Demo
 
 <p align="center">
-  <img src="demo-release0.gif" alt="HotTopicHub product demo" width="880" />
+  <img src="https://raw.githubusercontent.com/Mike-Animal-Counseling/HotTopicHub/c3d02a53c043aecdf0f16bbbba4bc15efb26b155/demo-release0.gif" alt="HotTopicHub product demo" width="880" />
 </p>
 
 <p align="center"><em>Live discovery, daily community signals, and topic discussions in one place.</em></p>
