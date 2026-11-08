@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Report security issues privately through [GitHub's vulnerability reporting form](https://github.com/Mike-Animal-Counseling/HotTopicHub/security/advisories/new). Include the affected commit, reproduction steps, impact, and a suggested fix if available. Do not put credentials, private data, or exploit details in a public issue.
+Report security issues privately through [GitHub's vulnerability reporting form](https://github.com/Mike-Animal-Counseling/hot-topic-hub/security/advisories/new). Include the affected commit, reproduction steps, impact, and a suggested fix if available. Do not put credentials, private data, or exploit details in a public issue.
 
 Only the latest default-branch version receives security fixes. There are no supported stable releases yet.
 
