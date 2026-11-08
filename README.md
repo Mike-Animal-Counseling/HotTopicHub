@@ -9,7 +9,7 @@ A full-stack hub that brings AI-builder news from multiple sources into one live
 ## Demo
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Mike-Animal-Counseling/HotTopicHub/c3d02a53c043aecdf0f16bbbba4bc15efb26b155/demo-release0.gif" alt="HotTopicHub product demo" width="880" />
+  <img src="https://raw.githubusercontent.com/Mike-Animal-Counseling/hot-topic-hub/c3d02a53c043aecdf0f16bbbba4bc15efb26b155/demo-release0.gif" alt="HotTopicHub product demo" width="880" />
 </p>
 
 <p align="center"><em>Live discovery, daily community signals, and topic discussions in one place.</em></p>
@@ -32,7 +32,7 @@ Built with **React + Vite + React Router** on the frontend and **FastAPI + SQLAl
 You'll need Python 3.12+ and Node.js 20.19+ (20.x) or 22.12+. Run the backend and frontend in separate terminals.
 
 ```bash
-git clone https://github.com/Mike-Animal-Counseling/HotTopicHub.git
+git clone https://github.com/Mike-Animal-Counseling/hot-topic-hub.git
 cd HotTopicHub
 ```
 
